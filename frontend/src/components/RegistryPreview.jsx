@@ -47,7 +47,7 @@ const RegistryPreview = ({ data }) => {
   }
 
   return (
-    <div className="requests-table">
+    <div className="requests-table registry-table">
       <div style={{ padding: '20px', borderBottom: '1px solid #eee' }}>
         <h3>📑 Предпросмотр реестра</h3>
         <p>Всего строк: {rows.length}</p>
@@ -72,58 +72,93 @@ const RegistryPreview = ({ data }) => {
             </tr>
           </thead>
 
-          <tbody>
-            {rows.map((r, i) => (
-              <tr key={i}>
-                <td>{r.id}</td>
-                <td>{r.supplier}</td>
-                <td>{r.invoice_details}</td>
-                <td>{r.contractor}</td>
+         <tbody>
+  {rows.map((r, i) => (
+    <tr key={i}>
+      <td>{r.id}</td>
 
-                {/* Плательщик */}
-                <td>
-                  <select
-                    className="payer-select"
-                    value={r.payer}
-                    onChange={e => updateRow(i, 'payer', e.target.value)}
-                  >
-                    {PAYERS.map(p => (
-                      <option key={p} value={p}>
-                        {p}
-                      </option>
-                    ))}
-                  </select>
-                </td>
+      {/* Поставщик — input */}
+      <td>
+        <input
+          className="cell-input"
+          value={r.supplier || ''}
+          onChange={e => updateRow(i, 'supplier', e.target.value)}
+        />
+      </td>
 
-                <td>{r.amount}</td>
-                <td>{r.vat_amount}</td>
+      <td>{r.invoice_details}</td>
+      <td>{r.contractor}</td>
 
-                {/* Учтено — всегда Да */}
-                <td>Да</td>
+      {/* Плательщик — select */}
+      <td>
+        <select
+          className="payer-select"
+          value={r.payer}
+          onChange={e => updateRow(i, 'payer', e.target.value)}
+        >
+          {PAYERS.map(p => (
+            <option key={p} value={p}>
+              {p}
+            </option>
+          ))}
+        </select>
+      </td>
 
-                {/* Система расчетов */}
-                <td>
-                  <select
-                    className="payer-select"
-                    value={r.payment_system}
-                    onChange={e =>
-                      updateRow(i, 'payment_system', e.target.value)
-                    }
-                  >
-                    {PAYMENT_SYSTEMS.map(p => (
-                      <option key={p} value={p}>
-                        {p}
-                      </option>
-                    ))}
-                  </select>
-                </td>
+      <td>{r.amount}</td>
+      <td>{r.vat_amount}</td>
 
-                <td>{r.comment}</td>
-                <td>{r.vehicle}</td>
-                <td>{r.license_plate}</td>
-              </tr>
-            ))}
-          </tbody>
+      {/* Учтено — всегда Да */}
+      <td>Да</td>
+
+      {/* Система расчетов — select */}
+      <td>
+        <select
+          className="payer-select"
+          value={r.payment_system}
+          onChange={e =>
+            updateRow(i, 'payment_system', e.target.value)
+          }
+        >
+          {PAYMENT_SYSTEMS.map(p => (
+            <option key={p} value={p}>
+              {p}
+            </option>
+          ))}
+        </select>
+      </td>
+
+      {/* Комментарий — input */}
+      <td>
+        <input
+          className="cell-input"
+          value={r.comment || ''}
+          onChange={e => updateRow(i, 'comment', e.target.value)}
+        />
+      </td>
+
+      {/* Техника — input */}
+      <td>
+        <input
+          className="cell-input"
+          value={r.vehicle || ''}
+          onChange={e => updateRow(i, 'vehicle', e.target.value)}
+        />
+      </td>
+
+      {/* г.н — input */}
+      <td>
+        <input
+          className="cell-input"
+          value={r.license_plate || ''}
+          onChange={e =>
+            updateRow(i, 'license_plate', e.target.value)
+          }
+        />
+      </td>
+    </tr>
+  ))}
+</tbody>
+
         </table>
       </div>
     </div>

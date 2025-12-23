@@ -1,13 +1,77 @@
-.payer-select {
+/* =========================
+   РЕЕСТР (RegistryPreview)
+   ========================= */
+
+/* таблица реестра */
+.registry-table table {
+  width: 100%;
+  min-width: 1400px; /* 👈 чтобы колонки не сжимались */
+  table-layout: fixed;
+  border-collapse: collapse;
+}
+
+/* ячейки */
+.registry-table th,
+.registry-table td {
+  padding: 8px 10px;
+  vertical-align: top;
+  white-space: normal;
+  overflow: hidden;
+}
+
+/* =========================
+   Инпуты и селекты
+   ========================= */
+
+.registry-table .cell-input,
+.registry-table .payer-select {
+  width: 100%;
+  box-sizing: border-box; /* 🔥 ключ */
   border: none;
   background: transparent;
   outline: none;
   font: inherit;
-  cursor: pointer;
-  padding: 0;
+  padding: 4px 2px;
 }
 
-.payer-select:focus {
+/* фокус */
+.registry-table .cell-input:focus,
+.registry-table .payer-select:focus {
+  background: #f5f7fa;
   outline: none;
   box-shadow: none;
+  border-radius: 4px;
+}
+
+/* селект */
+.registry-table .payer-select {
+  cursor: pointer;
+}
+
+/* =========================
+   ШИРИНЫ КОЛОНОК (РЕЕСТР)
+   ========================= */
+
+/* Поставщик */
+.registry-table th:nth-child(2),
+.registry-table td:nth-child(2) {
+  min-width: 220px;
+}
+
+/* Комментарий */
+.registry-table th:nth-child(10),
+.registry-table td:nth-child(10) {
+  min-width: 280px;
+}
+
+/* Техника */
+.registry-table th:nth-child(11),
+.registry-table td:nth-child(11) {
+  min-width: 220px;
+}
+
+/* г.н */
+.registry-table th:nth-child(12),
+.registry-table td:nth-child(12) {
+  min-width: 140px;
 }
