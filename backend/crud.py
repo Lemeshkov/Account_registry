@@ -2,6 +2,8 @@ from sqlalchemy.orm import Session
 from . import models
 from typing import Dict, Any
 from datetime import datetime
+import json
+
 
 def _json_safe(value):
     if isinstance(value, datetime):
@@ -46,48 +48,100 @@ def create_history(db: Session, action: str, entity: str, entity_id: int = None,
     return entry
 
 def build_registry_from_batch(db: Session, batch_id: str):
-    imported_requests = (
-        db.query(models.ImportedRequest)
-        .filter_by(import_batch=batch_id)
+    registry_items = (
+        db.query(models.PaymentRegistry)
+        .filter(models.PaymentRegistry.imported_batch == batch_id)
         .all()
     )
 
-    registry_preview = []
+    preview = []
 
-    for req in imported_requests:
-        data = {
-            "number": None,
-            "supplier": req.car_brand,          #  МАРКА → ПОСТАВЩИК
-            "invoice_details": None,
-            "contractor": None,
-            "payer": None,
-            "amount": None,
-            "vat_amount": None,
-            "included_in_plan": None,
-            "payment_system": None,
-            "comment": req.item_name,            #  НАИМЕНОВАНИЕ → КОММЕНТАРИЙ
-            "vehicle": req.car_brand,            #  МАРКА → ТЕХНИКА
-            "license_plate": req.license_plate,  #  ГОС НОМЕР
-            "imported_batch": batch_id,
-            "matched_request_id": req.id,
-        }
+    for item in registry_items:
+        invoice = item.invoice_details
 
-        obj = create_payment_registry_item(db, data, batch_id)
+        # 🔥 НОРМАЛИЗАЦИЯ
+        if isinstance(invoice, str):
+            try:
+                invoice = json.loads(invoice)
+            except Exception:
+                invoice = {}
 
-        registry_preview.append({
-            "id": obj.id,
-            "supplier": obj.supplier,
-            "invoice_details": obj.invoice_details,
-            "contractor": obj.contractor,
-            "payer": obj.payer,
-            "amount": obj.amount,
-            "vat_amount": obj.vat_amount,
-            "included_in_plan": obj.included_in_plan,
-            "payment_system": obj.payment_system,
-            "comment": obj.comment,
-            "vehicle": obj.vehicle,
-            "license_plate": obj.license_plate,
+        invoice = invoice or {}
+
+        status = "WAITING_INVOICE"
+        if invoice:
+            status = "MATCHED"
+
+        preview.append({
+            "id": item.id,
+            "supplier": item.supplier,
+            "vehicle": item.vehicle,
+            "license_plate": item.license_plate,
+            "amount": item.amount,
+            "vat_amount": item.vat_amount,
+            "comment": item.comment,
+            "status": status,
+            "invoice_confidence": invoice.get("confidence"),
+            "invoice_details": invoice,          # ← ВАЖНО ДЛЯ ФРОНТА
+            "source": {
+                "request": bool(item.matched_request_id),
+                "invoice": bool(invoice),
+            },
         })
 
-    db.commit()
-    return registry_preview
+    return preview
+
+
+def apply_invoice_ocr_to_registry(db: Session, registry_id: int, invoice_data: Dict[str, Any]):
+    """
+    Применяет данные OCR счета к элементу реестра
+    """
+    registry = db.query(models.PaymentRegistry).get(registry_id)
+    if not registry:
+        raise ValueError("PaymentRegistry not found")
+
+    data = invoice_data.get("data", {})
+    confidence = invoice_data.get("confidence")
+
+    registry.invoice_details = invoice_data
+
+    if data.get("supplier"):
+        registry.supplier = data["supplier"]
+        
+    from .crud import parse_number
+
+    total = parse_number(data.get("total"))
+    vat = parse_number(data.get("vat"))
+
+    if total is not None:
+       registry.amount = total
+    if vat is not None:
+       registry.vat_amount = vat
+
+
+    create_history(
+        db,
+        action="OCR_APPLY",
+        entity="PaymentRegistry",
+        entity_id=registry.id,
+        details={
+            "confidence": confidence,
+            "applied_fields": list(data.keys())
+        }
+    )
+
+    db.flush()
+    return registry
+ 
+def parse_number(value):
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        value = value.replace(" ", "").replace(",", ".")
+        try:
+            return float(value)
+        except ValueError:
+            return None
+    return None

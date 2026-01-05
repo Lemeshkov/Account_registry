@@ -1,0 +1,113 @@
+# Игнорируемые папки
+node_modules/
+dist/
+build/
+.coverage/
+.vscode/
+.git/
+
+# Игнорируемые файлы
+*.log
+*.tmp
+*.cache
+.DS_Store
+Thumbs.db
+
+# Игнорировать все кроме определенных расширений
+# !*.js
+# !*.py
+# !*.json
+
+# Игнорируемые папки
+$excludeFolders = @('node_modules', 'dist', 'build', '.coverage', '.vscode', '.git')
+
+# Игнорируемые файлы по расширению
+$excludeFiles = @('*.log', '*.tmp', '*.cache', '.DS_Store', 'Thumbs.db')
+
+function Get-TreeItem {
+    param(
+        [string]$Path = ".",
+        [int]$Level = 0,
+        [string]$Prefix = ""
+    )
+    
+    # Получаем элементы с учетом фильтрации
+    $items = Get-ChildItem -Path $Path -Force -ErrorAction SilentlyContinue | 
+             Where-Object { 
+                 $isFolder = $_.PSIsContainer
+                 $name = $_.Name
+                 
+                 # Игнорируем текущую и родительскую директорию
+                 if ($name -in @('.', '..')) {
+                     return $false
+                 }
+                 
+                 # Пропускаем скрытые системные файлы, начинающиеся с точки
+                 if ($name -match '^\.') {
+                     return $false
+                 }
+                 
+                 # Фильтрация папок
+                 if ($isFolder -and $name -in $excludeFolders) {
+                     return $false
+                 }
+                 
+                 # Фильтрация файлов по расширению
+                 if (-not $isFolder) {
+                     foreach ($pattern in $excludeFiles) {
+                         if ($pattern.StartsWith('*.')) {
+                             $ext = $pattern.TrimStart('*')
+                             if ($name -like "*$ext") {
+                                 return $false
+                             }
+                         } elseif ($name -eq $pattern) {
+                             return $false
+                         }
+                     }
+                 }
+                 
+                 return $true
+             } | Sort-Object PSIsContainer -Descending
+    
+    $itemCount = $items.Count
+    $currentIndex = 0
+    
+    foreach ($item in $items) {
+        $currentIndex++
+        $isLast = $currentIndex -eq $itemCount
+        
+        # Определяем символы для отрисовки дерева
+        if ($Level -eq 0) {
+            if ($isLast) {
+                $connector = "└── "
+                $nextPrefix = "    "
+            } else {
+                $connector = "├── "
+                $nextPrefix = "│   "
+            }
+        } else {
+            if ($isLast) {
+                $connector = "└── "
+                $newPref = "    "
+            } else {
+                $connector = "├── "
+                $newPref = "│   "
+            }
+            $nextPrefix = $Prefix + $newPref
+        }
+        
+        # Выбираем иконку
+        $icon = if ($item.PSIsContainer) { "📁 " } else { "📄 " }
+        
+        # Выводим текущий элемент
+        Write-Host "$Prefix$connector$icon$($item.Name)"
+        
+        # Рекурсивно обрабатываем папки (до 3 уровня)
+        if ($item.PSIsContainer -and $Level -lt 2) {
+            Get-TreeItem -Path $item.FullName -Level ($Level + 1) -Prefix ($Prefix + $nextPrefix)
+        }
+    }
+}
+
+# Запускаем отображение дерева
+Get-TreeItem -Path "."

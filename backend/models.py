@@ -34,7 +34,7 @@ class PaymentRegistry(Base):
     id = Column(Integer, primary_key=True, index=True)
     number = Column(String, index=True, nullable=True)          # поле "№" реестра
     supplier = Column(String, nullable=True)                    # Поставщик
-    invoice_details = Column(Text, nullable=True)               # Реквизиты счета
+    invoice_details = Column(JSON, nullable=True)               # Реквизиты счета
     contractor = Column(String, nullable=True)                  # Контрагент
     payer = Column(String, nullable=True)                       # Плательщик
 
