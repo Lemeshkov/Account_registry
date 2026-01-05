@@ -3,6 +3,8 @@ from . import models
 from typing import Dict, Any
 from datetime import datetime
 import json
+from .utils.numbers import parse_number
+from decimal import Decimal
 
 
 def _json_safe(value):
@@ -59,7 +61,7 @@ def build_registry_from_batch(db: Session, batch_id: str):
     for item in registry_items:
         invoice = item.invoice_details
 
-        # 🔥 НОРМАЛИЗАЦИЯ
+        #  НОРМАЛИЗАЦИЯ
         if isinstance(invoice, str):
             try:
                 invoice = json.loads(invoice)
@@ -92,32 +94,45 @@ def build_registry_from_batch(db: Session, batch_id: str):
     return preview
 
 
-def apply_invoice_ocr_to_registry(db: Session, registry_id: int, invoice_data: Dict[str, Any]):
+def apply_invoice_ocr_to_registry(
+    db: Session,
+    registry_id: int,
+    invoice_data: Dict[str, Any],
+):
     """
-    Применяет данные OCR счета к элементу реестра
+    Применяет OCR-инвойс к существующей строке реестра
+    PDF НИКОГДА не создаёт новые строки
     """
+
     registry = db.query(models.PaymentRegistry).get(registry_id)
     if not registry:
         raise ValueError("PaymentRegistry not found")
 
-    data = invoice_data.get("data", {})
+    data = invoice_data.get("data") or {}
     confidence = invoice_data.get("confidence")
 
-    registry.invoice_details = invoice_data
+    # 📄 сохраняем ТОЛЬКО данные OCR
+    registry.invoice_details = data
 
-    if data.get("supplier"):
-        registry.supplier = data["supplier"]
-        
+    # 📊 confidence — отдельно
+    if confidence is not None:
+        registry.invoice_confidence = confidence
+
     from .crud import parse_number
 
+    # 💰 суммы
     total = parse_number(data.get("total"))
     vat = parse_number(data.get("vat"))
 
     if total is not None:
-       registry.amount = total
-    if vat is not None:
-       registry.vat_amount = vat
+        registry.amount = total
 
+    if vat is not None:
+        registry.vat_amount = vat
+
+    # 🏷 supplier можно уточнить, но не затирать мусором
+    if data.get("supplier"):
+        registry.supplier = data["supplier"]
 
     create_history(
         db,
@@ -126,22 +141,10 @@ def apply_invoice_ocr_to_registry(db: Session, registry_id: int, invoice_data: D
         entity_id=registry.id,
         details={
             "confidence": confidence,
-            "applied_fields": list(data.keys())
-        }
+            "applied_fields": list(data.keys()),
+        },
     )
 
     db.flush()
     return registry
- 
-def parse_number(value):
-    if value is None:
-        return None
-    if isinstance(value, (int, float)):
-        return float(value)
-    if isinstance(value, str):
-        value = value.replace(" ", "").replace(",", ".")
-        try:
-            return float(value)
-        except ValueError:
-            return None
-    return None
+

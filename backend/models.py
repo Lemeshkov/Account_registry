@@ -1,13 +1,28 @@
-              # JSON с деталями (old/new/row)
-# backend/models.py
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, Float, Text, ForeignKey, JSON
+from sqlalchemy import (
+    Column,
+    Integer,
+    String,
+    Boolean,
+    DateTime,
+    Text,
+    ForeignKey,
+    JSON,
+    Numeric,
+    UniqueConstraint,
+)
 from sqlalchemy.sql import func
 from .database import Base
+
+
+# -------------------------------------------------------------------
+# IMPORTED REQUESTS (из Excel)
+# -------------------------------------------------------------------
 
 class ImportedRequest(Base):
     __tablename__ = "imported_requests"
 
     id = Column(Integer, primary_key=True, index=True)
+
     request_number = Column(String, index=True, nullable=True)
     request_date = Column(DateTime, nullable=True)
 
@@ -22,42 +37,72 @@ class ImportedRequest(Base):
 
     completion_date = Column(DateTime, nullable=True)
 
-    import_batch = Column(String, index=True, nullable=True)
+    import_batch = Column(String, index=True, nullable=False)
     file_name = Column(String, nullable=True)
     file_type = Column(String, nullable=True)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
+
+# -------------------------------------------------------------------
+# PAYMENT REGISTRY
+# -------------------------------------------------------------------
+
 class PaymentRegistry(Base):
     __tablename__ = "payment_registry"
+    __table_args__ = (
+        # 🔒 Защита от дублей Excel в рамках одного batch
+        UniqueConstraint(
+            "imported_batch",
+            "license_plate",
+            "amount",
+            name="uq_payment_registry_batch_plate_amount",
+        ),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
-    number = Column(String, index=True, nullable=True)          # поле "№" реестра
-    supplier = Column(String, nullable=True)                    # Поставщик
-    invoice_details = Column(JSON, nullable=True)               # Реквизиты счета
-    contractor = Column(String, nullable=True)                  # Контрагент
-    payer = Column(String, nullable=True)                       # Плательщик
 
-    amount = Column(Float, nullable=True)                       # Сумма
-    vat_amount = Column(Float, nullable=True)                   # в т.ч. НДС
-    included_in_plan = Column(Boolean, nullable=True)           # Учтено в фин.плане
-    payment_system = Column(String, nullable=True)              # Система расчетов
-    comment = Column(Text, nullable=True)                       # Комментарий
+    number = Column(String, index=True, nullable=True)      # № строки реестра
+    supplier = Column(String, nullable=True)                # Поставщик
+    contractor = Column(String, nullable=True)              # Контрагент
+    payer = Column(String, nullable=True)                   # Плательщик
 
-    vehicle = Column(String, nullable=True)                     # Техника
-    license_plate = Column(String, nullable=True)               # Гос номер
+    # 💰 Деньги — ТОЛЬКО Numeric (PostgreSQL-safe)
+    amount = Column(Numeric(12, 2), nullable=False)
+    vat_amount = Column(Numeric(12, 2), nullable=True)
 
-    matched_request_id = Column(Integer, ForeignKey("imported_requests.id"), nullable=True)
-    imported_batch = Column(String, index=True, nullable=True)  # батч/сессия создания реестра
+    included_in_plan = Column(Boolean, nullable=True)
+    payment_system = Column(String, nullable=True)
+    comment = Column(Text, nullable=True)
+
+    vehicle = Column(String, nullable=True)
+    license_plate = Column(String, index=True, nullable=True)
+
+    # 📄 OCR / PDF
+    invoice_details = Column(JSON, nullable=True)            # данные OCR (data)
+    invoice_confidence = Column(Numeric(4, 3), nullable=True)  # 0.000 – 1.000
+
+    matched_request_id = Column(
+        Integer,
+        ForeignKey("imported_requests.id"),
+        nullable=True,
+    )
+
+    imported_batch = Column(String, index=True, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+# -------------------------------------------------------------------
+# HISTORY LOG
+# -------------------------------------------------------------------
 
 class HistoryLog(Base):
     __tablename__ = "history_log"
 
     id = Column(Integer, primary_key=True, index=True)
-    action = Column(String, index=True)      # CREATE / UPDATE / DELETE / IMPORT / MATCH
-    entity = Column(String, index=True)      # ImportedRequest / PaymentRegistry / User
+    action = Column(String, index=True)          # CREATE / UPDATE / MATCH / OCR
+    entity = Column(String, index=True)          # PaymentRegistry / ImportedRequest
     entity_id = Column(Integer, index=True, nullable=True)
     timestamp = Column(DateTime(timezone=True), server_default=func.now())
-    user = Column(String, nullable=True)     # опционально: кто сделал действие
-    details = Column(JSON)                   # JSON с деталями (old/new/row)
+    user = Column(String, nullable=True)
+    details = Column(JSON)

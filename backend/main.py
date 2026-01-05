@@ -1,4 +1,5 @@
 # backend/main.py
+
 from fastapi import (
     FastAPI,
     File,
@@ -27,7 +28,7 @@ from .crud import (
     create_payment_registry_item,
 )
 from .services.invoice_matcher import try_match_invoice
-from .services.invoice_buffer import add_invoice, pop_invoices
+from .services.invoice_buffer import pop_invoices
 
 log = logging.getLogger(__name__)
 
@@ -37,6 +38,7 @@ log = logging.getLogger(__name__)
 
 app = FastAPI(title="Registry Control API", version="1.0.0")
 
+
 @app.on_event("startup")
 def on_startup():
     try:
@@ -44,6 +46,7 @@ def on_startup():
         log.info("Database connected and tables ensured")
     except Exception:
         log.exception("Database connection failed (startup continues)")
+
 
 app.add_middleware(
     CORSMiddleware,
@@ -54,10 +57,7 @@ app.add_middleware(
 )
 
 BASE_UPLOAD_DIR = Path("backend/uploads")
-INVOICE_UPLOAD_DIR = BASE_UPLOAD_DIR / "invoices"
-
 BASE_UPLOAD_DIR.mkdir(exist_ok=True)
-INVOICE_UPLOAD_DIR.mkdir(exist_ok=True)
 
 app.mount("/uploads", StaticFiles(directory=BASE_UPLOAD_DIR), name="uploads")
 
@@ -67,7 +67,8 @@ app.mount("/uploads", StaticFiles(directory=BASE_UPLOAD_DIR), name="uploads")
 
 def process_invoice_pdf_background(file_path: Path, batch_id: str):
     """
-    Фоновая задача OCR + матчинг
+    Фоновая задача: OCR → match → apply
+    PDF НИКОГДА не создаёт PaymentRegistry
     """
     db = SessionLocal()
     try:
@@ -78,41 +79,24 @@ def process_invoice_pdf_background(file_path: Path, batch_id: str):
             log.error("Invoice parsing failed")
             return
 
-        # сохраняем batch_id в parsed для отслеживания
         parsed["batch_id"] = batch_id
 
-        match = try_match_invoice(db, parsed["data"])
-        if match:
-            apply_invoice_ocr_to_registry(db, match.id, parsed)
-            db.commit()
-            log.info(f"Invoice applied to registry {match.id}")
-        else:
-            # 🔥 СОЗДАЁМ НОВУЮ СТРОКУ В РЕЕСТРЕ
-           from .crud import parse_number
+        match = try_match_invoice(db, parsed["data"], batch_id=batch_id)
 
-           log.info(
-    f"PDF parsed totals: total={parsed['data'].get('total')} "
-    f"→ {parse_number(parsed['data'].get('total'))}"
-)
-
-
-        create_payment_registry_item(
-            db,
-            {
-                "supplier": parsed["data"].get("supplier"),
-                "vehicle": None,
-                "license_plate": None,
-                "amount": parse_number(parsed["data"].get("total")),
-                "vat_amount": parse_number(parsed["data"].get("vat")),
-                "comment": "Счёт (PDF)",
-                "matched_request_id": None,
-                "invoice_details": parsed,
-             },
-             batch_id,
+        if not match:
+            log.warning(
+                "Invoice not matched, skipped",
+                extra={
+                    "batch_id": batch_id,
+                    "invoice": parsed["data"],
+                },
             )
+            return
 
+        apply_invoice_ocr_to_registry(db, match.id, parsed)
         db.commit()
-        log.info("Invoice created as new registry item")
+
+        log.info(f"Invoice applied to registry {match.id}")
 
     except Exception:
         db.rollback()
@@ -128,21 +112,20 @@ def process_invoice_pdf_background(file_path: Path, batch_id: str):
 async def upload_file(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
-    batch_id: str | None = Form(None), 
+    batch_id: str | None = Form(None),
     db: Session = Depends(get_db),
 ):
-
     ext = file.filename.split(".")[-1].lower()
     if ext not in ("xlsx", "xls", "pdf"):
         raise HTTPException(status_code=400, detail="Supported: xlsx, xls, pdf")
-    
+
     if not batch_id:
-     batch_id = str(uuid.uuid4())
+        batch_id = str(uuid.uuid4())
+
     file_path = BASE_UPLOAD_DIR / f"{batch_id}_{file.filename}"
 
     with open(file_path, "wb") as f:
         shutil.copyfileobj(file.file, f)
-    file.file.close()
 
     # ----------------------------------------------------------------
     # EXCEL
@@ -154,10 +137,9 @@ async def upload_file(
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Excel parse error: {e}")
 
-        from .crud import create_payment_registry_item
-
         for row in parsed_rows:
             create_imported_request(db, row, batch_id, file.filename, ext)
+
             create_payment_registry_item(
                 db,
                 {
@@ -176,30 +158,20 @@ async def upload_file(
 
         registry_preview = build_registry_from_batch(db, batch_id)
 
-        # applied = 0
-        # for invoice in pop_invoices():
-        #     match = try_match_invoice(db, invoice["data"])
-        #     if match:
-        #         apply_invoice_ocr_to_registry(db, match.id, invoice)
-        #         applied += 1
-
-        # db.commit()
-
         return {
             "message": f"Excel imported, {len(parsed_rows)} rows processed",
             "batch_id": batch_id,
             "registry_preview": registry_preview,
-          
         }
 
     # ----------------------------------------------------------------
-    # PDF — фоновая обработка
+    # PDF
     # ----------------------------------------------------------------
     if ext == "pdf":
         background_tasks.add_task(
             process_invoice_pdf_background,
             file_path,
-            batch_id
+            batch_id,
         )
 
         return {
@@ -209,15 +181,11 @@ async def upload_file(
         }
 
 # -------------------------------------------------------------------
-# PREVIEW ENDPOINT
+# PREVIEW
 # -------------------------------------------------------------------
 
 @app.get("/invoice/{batch_id}/preview")
 def get_invoice_preview(batch_id: str, db: Session = Depends(get_db)):
-    """
-    Возвращает preview реестра для batch_id
-    и количество непримененных счетов
-    """
     registry_preview = build_registry_from_batch(db, batch_id)
     pending = [inv for inv in pop_invoices() if inv.get("batch_id") == batch_id]
 
