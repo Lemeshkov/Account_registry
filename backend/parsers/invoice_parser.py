@@ -1,50 +1,74 @@
+# backend/parsers/invoice_parser.py
 import re
 from backend.services.ocr_service import ocr_pdf
 from backend.parsers.regex_patterns import *
 
 def find_invoice_text(pages: list[str]) -> str:
     """
-    Находит страницу со словами 'счет на оплату'.
-    Если нет — объединяет все страницы.
+    Ищем страницу со словами 'счет' и 'оплат'.
+    Если нет — объединяем все страницы.
     """
     for page in pages:
-        if "счет на оплату" in page.lower():
+        low = page.lower()
+        if "счет" in low and "оплат" in low:
             return page
-    return " ".join(pages)  # если счет не найден, берем весь текст
+    return "\n".join(pages)
+
 
 def search(pattern: str, text: str):
     """
-    Безопасный поиск по регулярке.
-    Если regex содержит группу — возвращаем group(1),
-    иначе весь матч.
+    Безопасный regex-поиск с учётом переносов строк.
     """
-    m = re.search(pattern, text, re.IGNORECASE)
+    m = re.search(pattern, text, re.IGNORECASE | re.DOTALL)
     if not m:
         return None
-    if m.lastindex is None:
-        return m.group(0).strip()
-    return m.group(1).strip()
+    if m.lastindex == 1:
+        return m.group(1).strip()
+    if m.lastindex and m.lastindex > 1:
+        return tuple(g.strip() for g in m.groups())
+    return m.group(0).strip()
+
 
 def parse_invoice_from_pdf(pdf_path: str) -> dict:
-    print(">>> parse_invoice_from_pdf CALLED:", pdf_path)
+    pages = ocr_pdf(pdf_path)
+    text = find_invoice_text(pages)
 
-    try:
-        pages = ocr_pdf(pdf_path)  # только один вызов
-        print(">>> OCR PAGES:", len(pages))
-    except Exception as e:
-        pages = []
-        print(f"[OCR ERROR] {e}")
+    # ---- ИНФОРМАЦИЯ О СЧЕТЕ ----
+    invoice_match = search(INVOICE_NUMBER_DATE, text)
+    invoice_number = None
+    invoice_date = None
+    if isinstance(invoice_match, tuple):
+        invoice_number, invoice_date = invoice_match
 
-    text = find_invoice_text(pages) if pages else ""
+    # ---- ДАННЫЕ О КОНТРАГЕНТЕ ----
+    supplier = search(SUPPLIER_RE, text)
+
+    # ---- ФИНАНСЫ ----
+    inn = search(INN, text)
+    account = search(ACCOUNT, text)
+    total = search(TOTAL, text)
+    vat = search(VAT, text)
 
     data = {
-        "inn": search(INN, text),
-        "account": search(ACCOUNT, text),
-        "total": search(TOTAL, text),
-        "vat": search(VAT, text),
+        "invoice_number": invoice_number,
+        "invoice_date": invoice_date,
+        "supplier": supplier,
+        "inn": inn,
+        "account": account,
+        "total": total,
+        "vat": vat,
     }
 
-    confidence = round(sum(1 for v in data.values() if v) / len(data), 2)
+    confidence = round(sum(1 for v in data.values() if v) / len(data), 3)
 
-    return {"data": data, "confidence": confidence}
+    # ---- ЛОГИ ----
+    print("========== OCR TEXT (first 1000 chars) ==========")
+    print(text[:1000])
+    print("========== PARSED DATA ==========")
+    print(data)
+    print("Confidence:", confidence)
 
+    return {
+        "data": data,
+        "confidence": confidence,
+    }
