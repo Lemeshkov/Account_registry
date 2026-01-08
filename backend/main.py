@@ -16,7 +16,7 @@ from pathlib import Path
 import uuid
 import shutil
 import logging
-
+from collections import defaultdict
 from .database import get_db, engine, SessionLocal
 from .models import Base
 from .parsers.excel_parser import ExcelParser
@@ -137,21 +137,39 @@ async def upload_file(
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Excel parse error: {e}")
 
+        grouped: dict[str, list[dict]] = defaultdict(list)
+
         for row in parsed_rows:
-            create_imported_request(db, row, batch_id, file.filename, ext)
+            plate = row.get("license_plate")
+            if not plate:
+               continue
+            grouped[plate].append(row)
+
+        for plate, rows in grouped.items():
+    # логируем все строки
+            for row in rows:
+                create_imported_request(db, row, batch_id, file.filename, ext)
+
+            first = rows[0]
+
+            comments = list(
+                dict.fromkeys(
+                    r["item_name"] for r in rows if r.get("item_name")
+        )
+    )
 
             create_payment_registry_item(
                 db,
-                {
-                    "supplier": row.get("supplier"),
-                    "vehicle": row.get("car_brand"),
-                    "license_plate": row.get("license_plate"),
-                    "amount": row.get("amount") or 0,
-                    "vat_amount": row.get("vat_amount") or 0,
-                    "comment": row.get("item_name"),
-                    "matched_request_id": None,
-                },
-                batch_id,
+               {
+                   "supplier": None,
+                   "vehicle": first.get("car_brand"),
+                   "license_plate": plate,
+                   "amount": 0,
+                   "vat_amount": 0,
+                   "comment": "; ".join(comments),
+                   "matched_request_id": None,
+               },
+               batch_id,
             )
 
         db.commit()
