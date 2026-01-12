@@ -1,12 +1,14 @@
 import React, { useEffect, useState } from "react";
+import InvoiceMatchModal from "./InvoiceMatchModal";
 import "../styles.css";
 
 const PAYERS = ["Сибуглеснаб", "ООО Ромашка", "ИП Иванов"];
 
 const PAYMENT_SYSTEMS = ["Предоплата", "Постоплата"];
 
-const RegistryPreview = ({ data }) => {
+const RegistryPreview = ({ data, onReload }) => {
   const [rows, setRows] = useState([]);
+  const [matchInvoice, setMatchInvoice] = useState(null);
 
   // инициализация строк + дефолтные значения
   useEffect(() => {
@@ -51,6 +53,7 @@ const RegistryPreview = ({ data }) => {
         <table>
           <thead>
             <tr>
+              <th>Счет</th>
               <th>№</th>
               <th>Поставщик</th>
               <th>Реквизиты счета</th>
@@ -68,10 +71,6 @@ const RegistryPreview = ({ data }) => {
 
           <tbody>
             {rows.map((r, i) => {
-              // Форматируем JSON реквизитов счета
-              // const invoiceText = r.invoice_details
-              //   ? `${r.invoice_details.data?.supplier || ''}${r.invoice_details.data?.inn ? ', ИНН: ' + r.invoice_details.data.inn : ''}${r.invoice_details.data?.account ? ', р/с: ' + r.invoice_details.data.account : ''}${r.invoice_details.data?.total ? ', Сумма: ' + r.invoice_details.data.total : ''}`
-              //   : '';
               const d = r.invoice_details || {};
 
               const invoiceText =
@@ -81,6 +80,23 @@ const RegistryPreview = ({ data }) => {
 
               return (
                 <tr key={i}>
+                  <td>
+                    {r.invoice_details ? (
+                      <button
+                        onClick={() =>
+                          setMatchInvoice({
+                            id: r.invoice_id, // ← ОБЯЗАТЕЛЬНО
+                            details: r.invoice_details,
+                          })
+                        }
+                      >
+                        Сопоставить
+                      </button>
+                    ) : (
+                      "—"
+                    )}
+                  </td>
+
                   <td>{r.id}</td>
 
                   {/* Поставщик — input */}
@@ -163,11 +179,20 @@ const RegistryPreview = ({ data }) => {
                       }
                     />
                   </td>
+
                 </tr>
               );
             })}
           </tbody>
         </table>
+        {matchInvoice && (
+          <InvoiceMatchModal
+            invoice={matchInvoice}
+            registryRows={rows}
+            onClose={() => setMatchInvoice(null)}
+            onApplied={onReload}
+          />
+        )}
       </div>
     </div>
   );

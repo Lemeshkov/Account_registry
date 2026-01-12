@@ -104,6 +104,7 @@ def build_registry_from_batch(db: Session, batch_id: str):
             "comment": item.comment,
             "status": status,
             "invoice_confidence": item.invoice_confidence,
+            "invoice_id": item.invoice_id,
             "invoice_details": invoice,
             "source": {
                 "request": bool(item.matched_request_id),
@@ -132,16 +133,18 @@ def apply_invoice_ocr_to_registry(
 
     applied_fields: list[str] = []
 
-    # 📄 OCR данные
+    #  OCR данные
+    registry.invoice_id = invoice_data["id"]
     registry.invoice_details = data
     applied_fields.append("invoice_details")
+    applied_fields.append("invoice_id")
 
-    # 📊 Confidence
+    #  Confidence
     if confidence is not None:
         registry.invoice_confidence = confidence
         applied_fields.append("invoice_confidence")
 
-    # 💰 Суммы
+    #  Суммы
     total = parse_number(data.get("total"))
     vat = parse_number(data.get("vat"))
 
@@ -164,14 +167,9 @@ def apply_invoice_ocr_to_registry(
             registry.contractor = f'ООО "{m.group(1).title()}"'
             applied_fields.append("contractor")
 
-    # 🧾 Номер и дата счета
-    if data.get("invoice_number"):
-        registry.invoice_number = data["invoice_number"]
-        applied_fields.append("invoice_number")
-
-    if data.get("invoice_date"):
-        registry.invoice_date = data["invoice_date"]
-        applied_fields.append("invoice_date")
+    #  Номер и дата счета
+        registry.invoice_details = data
+        applied_fields.append("invoice_details")
 
     create_history(
         db,
