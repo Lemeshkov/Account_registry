@@ -17,7 +17,7 @@ import uuid
 import shutil
 import logging
 from collections import defaultdict
-
+from pydantic import BaseModel
 from .database import get_db, engine, SessionLocal
 from .models import Base
 from .parsers.excel_parser import ExcelParser
@@ -47,6 +47,10 @@ log = logging.getLogger(__name__)
 
 app = FastAPI(title="Registry Control API", version="1.0.0")
 
+class ApplyInvoiceLineRequest(BaseModel):
+    invoice_id: str
+    line_no: int
+    registry_id: int
 
 @app.on_event("startup")
 def on_startup():
@@ -246,16 +250,14 @@ def unmatched(batch_id: str):
 
 @app.post("/invoice/apply-line")
 def apply_invoice_line(
-    invoice_id: str,
-    line_no: int,
-    registry_id: int,
+    payload: ApplyInvoiceLineRequest,
     db: Session = Depends(get_db),
 ):
     line = (
         db.query(InvoiceLine)
         .filter(
-            InvoiceLine.invoice_id == invoice_id,
-            InvoiceLine.line_no == line_no,
+            InvoiceLine.invoice_id == payload.invoice_id,
+            InvoiceLine.line_no == payload.line_no,
             InvoiceLine.used.is_(False),
         )
         .first()
@@ -264,12 +266,12 @@ def apply_invoice_line(
     if not line:
         raise HTTPException(404, "Invoice line not found or already used")
 
-    registry = db.query(PaymentRegistry).get(registry_id)
+    registry = db.query(PaymentRegistry).get(payload.registry_id)
     if not registry:
         raise HTTPException(404, "Registry item not found")
 
     registry.amount = line.total
-    mark_invoice_line_used(db, invoice_id, line_no)
+    mark_invoice_line_used(db, payload.invoice_id, payload.line_no)
 
     create_history(
         db,
@@ -277,14 +279,15 @@ def apply_invoice_line(
         entity="PaymentRegistry",
         entity_id=registry.id,
         details={
-            "invoice_id": invoice_id,
-            "line_no": line_no,
+            "invoice_id": payload.invoice_id,
+            "line_no": payload.line_no,
             "amount": float(line.total),
         },
     )
 
     db.commit()
     return {"status": "ok"}
+
 
 # -------------------------------------------------------------------
 # ROOT
