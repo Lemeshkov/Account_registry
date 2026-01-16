@@ -1,16 +1,12 @@
-# backend/parsers/invoice_parser.py
 import re
 from backend.services.ocr_service import ocr_pdf
 from backend.parsers.regex_patterns import *
+from ..utils.numbers import parse_number
 
 def parse_invoice_lines(text: str) -> list[dict]:
+    """Парсим строки счета из таблицы товаров"""
     lines = []
-
-    pattern = re.compile(
-        INVOICE_LINE_RE,
-        re.IGNORECASE 
-    )
-
+    pattern = re.compile(INVOICE_LINE_RE, re.IGNORECASE)
 
     for m in pattern.finditer(text):
         lines.append({
@@ -25,17 +21,13 @@ def parse_invoice_lines(text: str) -> list[dict]:
 
     print("LINES FOUND:", len(lines))
     for l in lines:
-        print(l["raw"])   
+        print(l["raw"])
 
     return lines
 
 
-
 def find_invoice_text(pages: list[str]) -> str:
-    """
-    Ищем страницу со словами 'счет' и 'оплат'.
-    Если нет — объединяем все страницы.
-    """
+    """Ищем страницу с текстом счета; если нет — объединяем все страницы"""
     for page in pages:
         low = page.lower()
         if "счет" in low and "оплат" in low:
@@ -44,9 +36,7 @@ def find_invoice_text(pages: list[str]) -> str:
 
 
 def search(pattern: str, text: str):
-    """
-    Безопасный regex-поиск с учётом переносов строк.
-    """
+    """Безопасный regex-поиск с учётом переносов строк"""
     m = re.search(pattern, text, re.IGNORECASE | re.DOTALL)
     if not m:
         return None
@@ -58,10 +48,7 @@ def search(pattern: str, text: str):
 
 
 def extract_table_text(text: str) -> str:
-    """
-    Вырезаем только тело таблицы товаров.
-    Начинаем после заголовков таблицы.
-    """
+    """Вырезаем тело таблицы товаров"""
     m = re.search(
         r"(?:Товары|Товары\s*\(работы,\s*услуги\)).*?Цена(.+)",
         text,
@@ -70,8 +57,8 @@ def extract_table_text(text: str) -> str:
     return m.group(1) if m else text
 
 
-
 def parse_invoice_from_pdf(pdf_path: str) -> dict:
+    """Главная функция парсинга PDF счета"""
     pages = ocr_pdf(pdf_path)
     text = find_invoice_text(pages)
     table_text = extract_table_text(text)
@@ -84,19 +71,49 @@ def parse_invoice_from_pdf(pdf_path: str) -> dict:
     if isinstance(invoice_match, tuple):
         invoice_number, invoice_date = invoice_match
 
-    # ---- ДАННЫЕ О КОНТРАГЕНТЕ ----
-    supplier = search(SUPPLIER_RE, text)
+    # Формируем строку "Счет на оплату № … от …"
+    invoice_full_text = None
+    if invoice_number and invoice_date:
+        invoice_full_text = f"Счет на оплату № {invoice_number} от {invoice_date} г."
+
+
+ # ---- ДАННЫЕ О КОНТРАГЕНТЕ ----
+    contractor = None
+
+# 1️⃣ ИП — приоритет
+    ip_match = re.search(
+    r"Индивидуальный предприниматель\s+([А-ЯЁ][а-яё]+(?:\s+[А-ЯЁ][а-яё]+){1,2})",
+    text
+    )
+    if ip_match:
+        contractor = f"ИП {ip_match.group(1)}"
+    else:
+    # 2️⃣ ООО
+        oo_match = re.search(
+            r"(?:Получатель|Поставщик).*?ООО\s*[«\"]?([^»\"\n,]+)",
+            text,
+            re.IGNORECASE | re.DOTALL
+        )
+        if oo_match:
+            contractor = f'ООО "{oo_match.group(1).strip()}"'
+
 
     # ---- ФИНАНСЫ ----
     inn = search(INN, text)
-    account = search(ACCOUNT, text)
+
+    account_raw = search(ACCOUNT, text)
+    account = account_raw.replace(" ", "") if account_raw else None
+
     total = search(TOTAL, text)
-    vat = search(VAT, text)
+
+    vat_raw = search(VAT, text)
+    vat = vat_raw.replace(" ", "") if vat_raw else None
 
     data = {
         "invoice_number": invoice_number,
         "invoice_date": invoice_date,
-        "supplier": supplier,
+        "invoice_full_text": invoice_full_text,
+        "contractor": contractor,
         "inn": inn,
         "account": account,
         "total": total,
@@ -113,10 +130,7 @@ def parse_invoice_from_pdf(pdf_path: str) -> dict:
     print("Confidence:", confidence)
 
     return {
-    "data": data,
-    "lines": lines,
-    "confidence": confidence,
+        "data": data,
+        "lines": lines,
+        "confidence": confidence,
     }
-
-
-

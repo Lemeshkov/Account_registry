@@ -8,6 +8,7 @@ from fastapi import (
     Depends,
     BackgroundTasks,
     Form,
+    Path
 )
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -30,7 +31,7 @@ from .crud import (
     create_history,
 )
 from .services.invoice_matcher import try_match_invoice
-
+from decimal import Decimal
 from backend.models import PaymentRegistry, InvoiceLine
 from backend.services.invoice_buffer import (
     list_invoices,
@@ -38,6 +39,7 @@ from backend.services.invoice_buffer import (
     save_invoice_lines,
     mark_invoice_line_used,
 )
+from backend.services.invoice_buffer import get_invoice
 
 log = logging.getLogger(__name__)
 
@@ -52,13 +54,10 @@ class ApplyInvoiceLineRequest(BaseModel):
     line_no: int
     registry_id: int
 
+
 @app.on_event("startup")
 def on_startup():
-    try:
-        Base.metadata.create_all(bind=engine)
-        log.info("Database connected and tables ensured")
-    except Exception:
-        log.exception("Database connection failed (startup continues)")
+    Base.metadata.create_all(bind=engine)
 
 
 app.add_middleware(
@@ -79,62 +78,175 @@ app.mount("/uploads", StaticFiles(directory=BASE_UPLOAD_DIR), name="uploads")
 # -------------------------------------------------------------------
 
 def process_invoice_pdf_background(file_path: Path, batch_id: str):
-    """
-    OCR → match → apply
-    PDF не создаёт PaymentRegistry
-    """
     db = SessionLocal()
     try:
-        log.info(f"OCR started for {file_path}")
-
         parsed = parse_invoice_from_pdf(file_path)
         if not parsed:
-            log.warning("Invoice parsing returned empty result")
             return
 
         parsed["id"] = str(uuid.uuid4())
         parsed["batch_id"] = batch_id
         parsed["file"] = file_path.name
 
-        match = try_match_invoice(
+        # --- TRY MATCH ---
+        match = try_match_invoice(db, parsed["data"], batch_id=batch_id)
+
+        #  СОХРАНЯЕМ СТРОКИ СЧЕТА ВСЕГДА
+        save_invoice_lines(
             db,
-            parsed["data"],
+            invoice_id=parsed["id"],
             batch_id=batch_id,
+            lines=parsed.get("lines", []),
         )
 
-        if not match:
-            add_invoice(parsed)
-
-             #  ПРИВЯЗЫВАЕМ invoice_id ко ВСЕМ строкам batch
-            db.query(PaymentRegistry).filter(
-                 PaymentRegistry.imported_batch == batch_id,
-                 PaymentRegistry.invoice_id.is_(None)
-            ).update(
-                {PaymentRegistry.invoice_id: parsed["id"]},
-                 synchronize_session=False
-            )
-
-            save_invoice_lines(
-                db,
-                invoice_id=parsed["id"],
-                batch_id=batch_id,
-                lines=parsed.get("lines", []),
-            )
-
+        # --- MATCH ---
+        if match:
+            apply_invoice_ocr_to_registry(db, match.id, parsed)
             db.commit()
-            log.info("Invoice stored as unmatched", extra={"invoice_id": parsed["id"]})
             return
 
-        apply_invoice_ocr_to_registry(db, match.id, parsed)
-        db.commit()
+        # --- UNMATCHED ---
+        add_invoice(parsed)
 
-        log.info(f"Invoice applied to registry {match.id}")
+        registries = (
+            db.query(PaymentRegistry)
+            .filter(PaymentRegistry.imported_batch == batch_id)
+            .all()
+        )
+
+        # 🔹 ОБЕСПЕЧИВАЕМ, ЧТО invoice_id НЕ NULL
+        for r in registries:
+            if r.invoice_id is None:
+                r.invoice_id = parsed["id"]
+
+        # безопасный auto-apply для единственной строки
+        if len(registries) == 1:
+           registry = registries[0]
+           apply_invoice_ocr_to_registry(db, registry.id, parsed)
+
+        db.commit()
 
     except Exception:
         db.rollback()
-        log.exception("Background OCR failed")
+        log.exception("OCR failed")
     finally:
         db.close()
+
+# -------------------------------------------------------------------
+# APPLY INVOICE LINE 
+# -------------------------------------------------------------------
+
+from backend.services.invoice_buffer import get_invoice
+
+@app.post("/invoice/apply-line")
+def apply_invoice_line(payload: ApplyInvoiceLineRequest, db: Session = Depends(get_db)):
+    log.info(
+        "[APPLY_LINE] invoice_id=%s line_no=%s registry_id=%s",
+        payload.invoice_id,
+        payload.line_no,
+        payload.registry_id,
+    )
+
+    line = (
+        db.query(InvoiceLine)
+        .filter(
+            InvoiceLine.invoice_id == payload.invoice_id,
+            InvoiceLine.line_no == payload.line_no,
+            InvoiceLine.used.is_(False),
+        )
+        .first()
+    )
+    if not line:
+        log.warning("[APPLY_LINE] invoice line not found")
+        raise HTTPException(404, "Invoice line not found")
+
+    registry = db.query(PaymentRegistry).get(payload.registry_id)
+    if not registry:
+        log.warning("[APPLY_LINE] registry not found")
+        raise HTTPException(404, "Registry item not found")
+
+    # 🔥 ЕДИНСТВЕННЫЙ ИСТОЧНИК OCR
+    invoice = get_invoice(payload.invoice_id)
+    if not invoice:
+        log.error("[APPLY_LINE] invoice not found in buffer")
+        raise HTTPException(404, "Invoice not found")
+
+    log.info("[APPLY_LINE] OCR DATA FROM BUFFER: %s", invoice["data"])
+
+    invoice_data = {
+        "id": payload.invoice_id,
+        "data": dict(invoice["data"]),
+    }
+
+    # ⬇️ подменяем сумму выбранной строкой
+    invoice_data["data"]["total"] = float(line.total) if line.total else None
+
+    log.info(
+        "[APPLY_LINE] FINAL DATA BEFORE APPLY: %s",
+        invoice_data["data"],
+    )
+
+    apply_invoice_ocr_to_registry(db, registry.id, invoice_data)
+
+    mark_invoice_line_used(db, payload.invoice_id, payload.line_no)
+
+    db.commit()
+
+    log.info(
+        "[APPLY_LINE] APPLIED OK registry_id=%s contractor=%s amount=%s",
+        registry.id,
+        registry.contractor,
+        registry.amount,
+    )
+
+    return {"status": "ok"}
+
+
+# -------------------------------------------------------------------
+# APPLY BATCH INVOICES
+# -------------------------------------------------------------------
+
+@app.post("/invoice/apply-batch/{batch_id}", summary="Применить OCR-счета ко всем строкам batch")
+def apply_batch_invoices(batch_id: str, db: Session = Depends(get_db)):
+    registries = (
+        db.query(PaymentRegistry)
+        .filter(PaymentRegistry.imported_batch == batch_id)
+        .all()
+    )
+
+    if not registries:
+        raise HTTPException(404, detail="Batch not found or empty")
+
+    invoices = list_invoices(batch_id)
+
+    for r in registries:
+        if r.invoice_id:
+            invoices.append({"id": r.invoice_id, "data": r.invoice_details})
+
+    applied_count = 0
+
+    for registry in registries:
+        vehicle_text = (registry.vehicle or "").lower()
+        license_plate_text = (registry.license_plate or "").replace(" ", "").lower()
+
+        for invoice in invoices:
+            data = invoice.get("data") or {}
+            invoice_full_text = (data.get("invoice_full_text") or "").lower()
+
+            if not invoice_full_text:
+                continue
+
+            if vehicle_text.split()[0] in invoice_full_text or license_plate_text in invoice_full_text:
+                apply_invoice_ocr_to_registry(db, registry.id, invoice)
+                applied_count += 1
+                break
+
+    db.commit()
+    return {
+        "status": "ok",
+        "registries_processed": len(registries),
+        "invoices_applied": applied_count,
+    }
 
 # -------------------------------------------------------------------
 # UPLOAD
@@ -164,7 +276,6 @@ async def upload_file(
     # ----------------------------------------------------------------
     if ext in ("xlsx", "xls"):
         parser = ExcelParser()
-
         try:
             parsed_rows = parser.parse_file(file_path)
         except Exception as e:
@@ -245,57 +356,16 @@ def unmatched(batch_id: str):
     return list_invoices(batch_id)
 
 # -------------------------------------------------------------------
-# APPLY INVOICE LINE
-# -------------------------------------------------------------------
-
-@app.post("/invoice/apply-line")
-def apply_invoice_line(
-    payload: ApplyInvoiceLineRequest,
-    db: Session = Depends(get_db),
-):
-    line = (
-        db.query(InvoiceLine)
-        .filter(
-            InvoiceLine.invoice_id == payload.invoice_id,
-            InvoiceLine.line_no == payload.line_no,
-            InvoiceLine.used.is_(False),
-        )
-        .first()
-    )
-
-    if not line:
-        raise HTTPException(404, "Invoice line not found or already used")
-
-    registry = db.query(PaymentRegistry).get(payload.registry_id)
-    if not registry:
-        raise HTTPException(404, "Registry item not found")
-
-    registry.amount = line.total
-    mark_invoice_line_used(db, payload.invoice_id, payload.line_no)
-
-    create_history(
-        db,
-        action="APPLY_INVOICE_LINE",
-        entity="PaymentRegistry",
-        entity_id=registry.id,
-        details={
-            "invoice_id": payload.invoice_id,
-            "line_no": payload.line_no,
-            "amount": float(line.total),
-        },
-    )
-
-    db.commit()
-    return {"status": "ok"}
-
-
-# -------------------------------------------------------------------
 # ROOT
 # -------------------------------------------------------------------
 
 @app.get("/")
 def root():
     return {"message": "Registry Control API"}
+
+# -------------------------------------------------------------------
+# INVOICE LINES
+# -------------------------------------------------------------------
 
 @app.get("/invoice/{invoice_id}/lines")
 def get_invoice_lines_endpoint(
@@ -320,3 +390,5 @@ def get_invoice_lines_endpoint(
         }
         for l in lines
     ]
+
+
