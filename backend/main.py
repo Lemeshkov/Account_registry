@@ -83,6 +83,14 @@ def process_invoice_pdf_background(file_path: Path, batch_id: str):
         parsed = parse_invoice_from_pdf(file_path)
         if not parsed:
             return
+        
+        #  OCR без строк 
+        if not parsed.get("lines"):
+            log.warning(
+                "[OCR] Invoice parsed WITHOUT lines | file=%s | confidence=%.3f",
+                file_path.name,
+                parsed.get("confidence", 0),
+            )
 
         parsed["id"] = str(uuid.uuid4())
         parsed["batch_id"] = batch_id
