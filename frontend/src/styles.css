@@ -2,11 +2,65 @@
    РЕЕСТР (RegistryPreview)
    ========================= */
 
+/* Основной контейнер */
+.registry-container {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  max-height: 100vh;
+  overflow: hidden;
+}
+
+/* Заголовок фиксированный */
+.registry-header {
+  flex-shrink: 0;
+  padding: 15px 20px;
+  border-bottom: 1px solid #eee;
+  background: #f8f9fa;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+}
+
+.header-content {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 20px;
+}
+
+.header-left {
+  flex: 1;
+}
+
+.header-right {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.header-stats {
+  color: #666;
+  font-size: 14px;
+  margin: 5px 0 0 0;
+}
+
+/* Контейнер таблицы со скроллом */
+.registry-table-container {
+  flex: 1;
+  overflow: auto;
+  position: relative;
+}
+
+.registry-table-wrapper {
+  overflow-x: auto;
+  overflow-y: auto;
+  height: 100%;
+}
+
 /* таблица реестра */
-.registry-table table {
+.registry-table {
   width: 100%;
-  min-width: 1400px; /* 👈 чтобы колонки не сжимались */
-  table-layout: fixed;
+  min-width: 1400px;
+  table-layout: auto;
   border-collapse: collapse;
 }
 
@@ -16,7 +70,68 @@
   padding: 8px 10px;
   vertical-align: top;
   white-space: normal;
-  overflow: hidden;
+  overflow: visible;
+  text-overflow: clip;
+}
+
+/* Кнопки в заголовке */
+.header-btn {
+  padding: 8px 16px;
+  border: none;
+  border-radius: 4px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.header-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.match-btn {
+  background-color: #007bff;
+  color: white;
+}
+
+.match-btn:hover:not(:disabled) {
+  background-color: #0056b3;
+  transform: translateY(-1px);
+}
+
+.refresh-btn {
+  background-color: #6c757d;
+  color: white;
+}
+
+.refresh-btn:hover {
+  background-color: #545b62;
+  transform: translateY(-1px);
+}
+
+.test-btn {
+  background-color: #ffc107;
+  color: #212529;
+}
+
+.test-btn:hover {
+  background-color: #e0a800;
+  transform: translateY(-1px);
+}
+
+/* Выделенные строки */
+.has-invoice-row {
+  background-color: #f8fff8 !important;
+}
+
+.selected-row {
+  background-color: #e3f2fd !important;
+  box-shadow: inset 0 0 0 2px #2196f3;
 }
 
 /* =========================
@@ -24,27 +139,32 @@
    ========================= */
 
 .registry-table .cell-input,
-.registry-table .payer-select {
+.registry-table .payer-select,
+.registry-table .payment-system-select {
   width: 100%;
-  box-sizing: border-box; /* 🔥 ключ */
-  border: none;
-  background: transparent;
+  box-sizing: border-box;
+  border: 1px solid #ddd;
+  background: white;
   outline: none;
   font: inherit;
-  padding: 4px 2px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  font-size: 13px;
 }
 
 /* фокус */
 .registry-table .cell-input:focus,
-.registry-table .payer-select:focus {
+.registry-table .payer-select:focus,
+.registry-table .payment-system-select:focus {
   background: #f5f7fa;
   outline: none;
-  box-shadow: none;
-  border-radius: 4px;
+  border-color: #2196f3;
+  box-shadow: 0 0 0 2px rgba(33, 150, 243, 0.1);
 }
 
 /* селект */
-.registry-table .payer-select {
+.registry-table .payer-select,
+.registry-table .payment-system-select {
   cursor: pointer;
 }
 
@@ -52,26 +172,163 @@
    ШИРИНЫ КОЛОНОК (РЕЕСТР)
    ========================= */
 
+/* Специально для колонки "Реквизиты счета" (4-я колонка) */
+.registry-table th:nth-child(4),
+.registry-table td:nth-child(4) {
+  min-width: 300px;
+  max-width: 400px;
+  word-wrap: break-word;
+  word-break: normal;
+  overflow-wrap: break-word;
+}
+
+/* Выбор строки (1-я колонка) */
+.registry-table th:nth-child(1),
+.registry-table td:nth-child(1) {
+  width: 40px;
+  text-align: center;
+}
+
 /* Поставщик */
-.registry-table th:nth-child(2),
-.registry-table td:nth-child(2) {
+.registry-table th:nth-child(3),
+.registry-table td:nth-child(3) {
   min-width: 220px;
 }
 
 /* Комментарий */
-.registry-table th:nth-child(10),
-.registry-table td:nth-child(10) {
+.registry-table th:nth-child(11),
+.registry-table td:nth-child(11) {
   min-width: 280px;
 }
 
 /* Техника */
-.registry-table th:nth-child(11),
-.registry-table td:nth-child(11) {
+.registry-table th:nth-child(12),
+.registry-table td:nth-child(12) {
   min-width: 220px;
 }
 
 /* г.н */
-.registry-table th:nth-child(12),
-.registry-table td:nth-child(12) {
+.registry-table th:nth-child(13),
+.registry-table td:nth-child(13) {
   min-width: 140px;
+}
+
+/* =========================
+   СТИЛИ ДЛЯ ЯЧЕЕК
+   ========================= */
+.invoice-details-cell {
+  line-height: 1.4;
+  padding: 8px 0;
+}
+
+.invoice-title {
+  font-weight: 500;
+  color: #2c3e50;
+  margin-bottom: 4px;
+}
+
+.invoice-amount {
+  font-size: 12px;
+  color: #28a745;
+  font-weight: 500;
+}
+
+.invoice-id {
+  font-size: 11px;
+  color: #6c757d;
+  margin-top: 2px;
+  font-family: monospace;
+}
+
+.no-invoice-text {
+  color: #6c757d;
+  font-style: italic;
+  font-size: 0.9em;
+}
+
+.contractor-name {
+  font-weight: 500;
+}
+
+.empty-field {
+  color: #6c757d;
+}
+
+.amount-value {
+  font-weight: 600;
+  color: #28a745;
+}
+
+.included-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  background-color: #d4edda;
+  color: #155724;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+/* Радио-кнопка выбора */
+.selection-cell input[type="radio"] {
+  cursor: pointer;
+  transform: scale(1.2);
+}
+
+/* Строки таблицы */
+.registry-table tbody tr {
+  cursor: pointer;
+  transition: background-color 0.1s;
+}
+
+.registry-table tbody tr:hover {
+  background-color: #f8f9fa;
+}
+
+/* Отладочная панель */
+.debug-panel {
+  flex-shrink: 0;
+  padding: 10px;
+  background: #f8f9fa;
+  border-top: 1px solid #dee2e6;
+  font-size: 12px;
+  color: #6c757d;
+}
+
+.debug-content {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.console-log-btn {
+  background: none;
+  border: 1px solid #6c757d;
+  color: #6c757d;
+  padding: 2px 8px;
+  border-radius: 3px;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.console-log-btn:hover {
+  background-color: #6c757d;
+  color: white;
+}
+
+/* Индикатор загрузки */
+.loading-spinner {
+  padding: 8px 16px;
+  background-color: #e3f2fd;
+  color: #1565c0;
+  border-radius: 4px;
+  font-size: 14px;
+}
+
+/* Отладочная информация */
+.debug-info {
+  font-size: 12px;
+  color: #6c757d;
+  text-align: right;
+  margin-right: 10px;
 }
