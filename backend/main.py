@@ -1,5 +1,5 @@
-# backend/main.py
 
+# backend/main.py
 from fastapi import (
     FastAPI,
     File,
@@ -19,8 +19,9 @@ import shutil
 import logging
 from collections import defaultdict
 from pydantic import BaseModel
+from typing import List, Dict, Any
 from .database import get_db, engine, SessionLocal
-from .models import Base
+from .models import Base, PaymentRegistry, InvoiceLine
 from .parsers.excel_parser import ExcelParser
 from .parsers.invoice_parser import parse_invoice_from_pdf
 from .crud import (
@@ -29,18 +30,17 @@ from .crud import (
     create_imported_request,
     create_payment_registry_item,
     create_history,
+    update_registry_position,
+    reorder_registry_batch,
 )
-from typing import List
 from .services.invoice_matcher import try_match_invoice
-from decimal import Decimal
-from backend.models import PaymentRegistry, InvoiceLine
-from backend.services.invoice_buffer import (
+from .services.invoice_buffer import (
     list_invoices,
     add_invoice,
     save_invoice_lines,
     mark_invoice_line_used,
+    get_invoice,
 )
-from backend.services.invoice_buffer import get_invoice
 
 log = logging.getLogger(__name__)
 
@@ -50,16 +50,30 @@ log = logging.getLogger(__name__)
 
 app = FastAPI(title="Registry Control API", version="1.0.0")
 
+# Pydantic модели для запросов
 class ApplyInvoiceLineRequest(BaseModel):
     invoice_id: str
     line_no: int
     registry_id: int
 
+class ApplyInvoiceMetadataRequest(BaseModel):
+    invoice_id: str
+    registry_id: int
+    apply_fields: List[str] = ["contractor", "invoice_number", "invoice_date"]
+
+class ManualInvoiceMatchRequest(BaseModel):
+    batch_id: str
+    registry_id: int
+    invoice_id: str
+    apply_type: str = "full"  # "full", "metadata_only", "amount_only"
+
+class ReorderRequest(BaseModel):
+    batch_id: str
+    items: List[Dict[str, Any]]  # [{id: 1, position: 0}, {id: 2, position: 1}, ...]
 
 @app.on_event("startup")
 def on_startup():
     Base.metadata.create_all(bind=engine)
-
 
 app.add_middleware(
     CORSMiddleware,
@@ -77,7 +91,6 @@ app.mount("/uploads", StaticFiles(directory=BASE_UPLOAD_DIR), name="uploads")
 # -------------------------------------------------------------------
 # BACKGROUND OCR TASK
 # -------------------------------------------------------------------
-
 
 def process_invoice_pdf_background(file_path: Path, batch_id: str):
     db = SessionLocal()
@@ -99,10 +112,7 @@ def process_invoice_pdf_background(file_path: Path, batch_id: str):
         parsed["batch_id"] = batch_id
         parsed["file"] = file_path.name
         
-        # 3. УБИРАЕМ автоматическое обновление invoice_id у записей реестра
-        # ВМЕСТО этого просто сохраняем счет в буфер
-        
-        # 4. ВСЕГДА сохраняем строки счета в базу
+        # 3. ВСЕГДА сохраняем строки счета в базу
         if parsed.get("lines"):
             log.info("[OCR] Saving %d invoice lines to database", len(parsed["lines"]))
             save_invoice_lines(
@@ -114,7 +124,7 @@ def process_invoice_pdf_background(file_path: Path, batch_id: str):
         else:
             log.warning("[OCR] No product lines found in invoice")
         
-        # 5. ВСЕГДА сохраняем счет в буфер (для предпросмотра)
+        # 4. ВСЕГДА сохраняем счет в буфер (для предпросмотра)
         print(f"\n=== DEBUG: Adding to buffer ===")
         print(f"Invoice ID: {invoice_id}")
         
@@ -136,8 +146,7 @@ def process_invoice_pdf_background(file_path: Path, batch_id: str):
         # Сохраняем в буфер
         add_invoice(parsed)
         
-       
-        # 8. Фиксируем только строки товаров, НЕ изменяем реестр
+        # 5. Фиксируем только строки товаров, НЕ изменяем реестр
         db.commit()
         log.info("[OCR] Processing complete for %s", file_path.name)
         print(f"[DEBUG] Invoice saved to buffer: {invoice_id}")
@@ -153,12 +162,10 @@ def process_invoice_pdf_background(file_path: Path, batch_id: str):
     finally:
         db.close()
         print(f"[DEBUG] Database connection closed")
+
 # -------------------------------------------------------------------
 # APPLY INVOICE LINE 
 # -------------------------------------------------------------------
-
-from backend.services.invoice_buffer import get_invoice
-
 
 @app.post("/invoice/apply-line")
 def apply_invoice_line(payload: ApplyInvoiceLineRequest, db: Session = Depends(get_db)):
@@ -191,7 +198,7 @@ def apply_invoice_line(payload: ApplyInvoiceLineRequest, db: Session = Depends(g
         log.warning("[APPLY_LINE] registry not found")
         raise HTTPException(404, "Registry item not found")
 
-    # 🔥 Получаем данные счета из буфера
+    # Получаем данные счета из буфера
     invoice = get_invoice(payload.invoice_id)
     if not invoice:
         log.error("[APPLY_LINE] invoice not found in buffer")
@@ -206,7 +213,7 @@ def apply_invoice_line(payload: ApplyInvoiceLineRequest, db: Session = Depends(g
         "confidence": invoice.get("confidence", 0)
     }
 
-    # ⬇️ Применяем счет к строке реестра с указанием номера строки
+    #  Применяем счет к строке реестра с указанием номера строки
     apply_invoice_ocr_to_registry(
         db, 
         registry.id, 
@@ -222,15 +229,14 @@ def apply_invoice_line(payload: ApplyInvoiceLineRequest, db: Session = Depends(g
     db.commit()
 
     log.info(
-        "[APPLY_LINE] APPLIED OK registry_id=%s contractor=%s amount=%s",
+        "[APPLY_LINE] APPLIED OK registry_id=%s contractor=%s amount=%s position=%s",
         registry.id,
         registry.contractor,
         registry.amount,
+        registry.position,  #  Показываем позицию строки
     )
 
     return {"status": "ok"}
-
-
 
 # -------------------------------------------------------------------
 # APPLY BATCH INVOICES
@@ -279,7 +285,7 @@ def apply_batch_invoices(batch_id: str, db: Session = Depends(get_db)):
     }
 
 # -------------------------------------------------------------------
-# UPLOAD
+# UPLOAD EXCEL/PDF
 # -------------------------------------------------------------------
 
 @app.post("/upload", summary="Upload Excel or PDF")
@@ -307,33 +313,44 @@ async def upload_file(
     if ext in ("xlsx", "xls"):
         parser = ExcelParser()
         try:
-            parsed_rows = parser.parse_file(file_path)
+            # Используем новый метод, который возвращает данные с позициями
+            parsed_data = parser.parse_file_with_positions(file_path)
         except Exception as e:
             raise HTTPException(500, f"Excel parse error: {e}")
 
         grouped: dict[str, list[dict]] = defaultdict(list)
 
-        for row in parsed_rows:
-            plate = row.get("license_plate")
+        # Группируем строки по номеру машины, сохраняя позиции
+        for row_data, excel_position in parsed_data:
+            plate = row_data.get("license_plate")
             if plate:
-                grouped[plate].append(row)
+                grouped[plate].append({
+                    "row_data": row_data,
+                    "excel_position": excel_position
+                })
 
+        created_items = []
+        current_position = 0
+        
         for plate, rows in grouped.items():
-            for row in rows:
-                create_imported_request(db, row, batch_id, file.filename, ext)
+            # Создаем ImportedRequest для каждой строки в группе
+            for row_info in rows:
+                create_imported_request(db, row_info["row_data"], batch_id, file.filename, ext)
 
             first = rows[0]
             comments = list(
                 dict.fromkeys(
-                    r["item_name"] for r in rows if r.get("item_name")
+                    row_info["row_data"]["item_name"] for row_info in rows if row_info["row_data"].get("item_name")
                 )
             )
 
-            create_payment_registry_item(
+            # Создаем строку реестра с сохранением позиции из Excel
+            # Используем позицию первой строки в группе
+            registry_item = create_payment_registry_item(
                 db,
                 {
                     "supplier": None,
-                    "vehicle": first.get("car_brand"),
+                    "vehicle": first["row_data"].get("car_brand"),
                     "license_plate": plate,
                     "amount": 0,
                     "vat_amount": 0,
@@ -341,24 +358,27 @@ async def upload_file(
                     "matched_request_id": None,
                 },
                 batch_id,
+                position=first["excel_position"]  #  Передаем позицию из Excel 
             )
+            created_items.append(registry_item)
+            current_position += 1
 
         db.commit()
 
         registry_preview = build_registry_from_batch(db, batch_id)
     
         print(f"\n=== DEBUG /upload response ===")
-        print(f"Excel parsed: {len(parsed_rows)} rows")
+        print(f"Excel parsed: {len(parsed_data)} rows")
         print(f"Registry preview: {len(registry_preview)} items")
+        print(f"Positions: {[item.get('position') for item in registry_preview]}")
         
         # Возвращаем совместимый формат
         return {
-            "message": f"Excel imported, {len(parsed_rows)} rows processed",
-             "batch_id": batch_id,
-             "registry_preview": registry_preview,  # Для нового фронтенда
-            # Также добавляем данные в корень для старого фронтенда
+            "message": f"Excel imported, {len(parsed_data)} rows processed",
+            "batch_id": batch_id,
+            "registry_preview": registry_preview,
             "data": registry_preview,  # Дублирование для совместимости
-            }
+        }
 
     # ----------------------------------------------------------------
     # PDF
@@ -383,18 +403,15 @@ async def upload_file(
 def get_invoice_preview(batch_id: str, db: Session = Depends(get_db)):
     print(f"\n=== DEBUG /invoice/{batch_id}/preview ===")
     
-    # Получаем данные реестра из базы
+    # Получаем данные реестра из базы (сортировка по position)
     registry_preview = build_registry_from_batch(db, batch_id)
     
     print(f"Batch ID from URL: {batch_id}")
     print(f"Registry preview items: {len(registry_preview)}")
+    print(f"Order by position: {[item.get('position') for item in registry_preview]}")
     
     if len(registry_preview) == 0:
-        print("⚠️ WARNING: Registry preview is EMPTY!")
-    
-    # ДОБАВЛЯЕМ batch_id к каждой строке!
-    for item in registry_preview:
-        item["batch_id"] = batch_id
+        print(" WARNING: Registry preview is EMPTY!")
     
     # Получаем все счета для этого batch
     pending_invoices = list_invoices(batch_id)
@@ -455,7 +472,8 @@ def get_invoice_preview(batch_id: str, db: Session = Depends(get_db)):
         
         updated_registry.append(item)
     
-    # Форматируем данные счетов для фронтенда
+    # Форматируем данные счетов для фронтенд
+
     invoices_data = []
     for inv in pending_invoices:
         invoice_data = {
@@ -476,37 +494,22 @@ def get_invoice_preview(batch_id: str, db: Session = Depends(get_db)):
     
     print(f"Returning {len(updated_registry)} registry items and {len(pending_invoices)} invoices")
     
-    # ВАЖНО: Возвращаем ДВА ФОРМАТА для совместимости
-    # 1. Новый формат (объект с registry_preview) - для нового фронтенда
-    # 2. Старый формат (просто массив) - для старого фронтенда
-    
-    # Определяем формат по заголовку запроса или параметру
-    from fastapi import Request
-    import json
-    
     response_data = {
-        "registry_preview": updated_registry,  # Новый формат
+        "registry_preview": updated_registry,
         "pending_invoices": len(pending_invoices),
         "invoices": invoices_data,
-        "batch_id": batch_id,  # Добавляем batch_id для удобства
+        "batch_id": batch_id,
     }
     
     return response_data
+
 # -------------------------------------------------------------------
-# UNMATCHED
+# UNMATCHED INVOICES
 # -------------------------------------------------------------------
 
 @app.get("/invoices/unmatched/{batch_id}")
 def unmatched(batch_id: str):
     return list_invoices(batch_id)
-
-# -------------------------------------------------------------------
-# ROOT
-# -------------------------------------------------------------------
-
-@app.get("/")
-def root():
-    return {"message": "Registry Control API"}
 
 # -------------------------------------------------------------------
 # INVOICE LINES
@@ -536,12 +539,9 @@ def get_invoice_lines_endpoint(
         for l in lines
     ]
 
-
-#------------------------------------------------------------------
-# endpoint для получения счетов из буфера
-#------------------------------------------------------------------
-
-# backend/main.py - добавляем новый endpoint
+# -------------------------------------------------------------------
+# INVOICES FROM BUFFER
+# -------------------------------------------------------------------
 
 @app.get("/registry/{batch_id}/invoices-from-buffer")
 def get_invoices_from_buffer(batch_id: str):
@@ -552,14 +552,6 @@ def get_invoices_from_buffer(batch_id: str):
         
         print(f"\n=== DEBUG /invoices-from-buffer for batch {batch_id} ===")
         print(f"Found {len(pending_invoices)} invoices in buffer")
-        
-        for i, inv in enumerate(pending_invoices):
-            print(f"Invoice {i}: id={inv.get('id')}, file={inv.get('file')}")
-            if inv.get('data'):
-                data = inv['data']
-                print(f"  Contractor: {data.get('contractor')}")
-                print(f"  Invoice number: {data.get('invoice_number')}")
-                print(f"  Invoice full text: {data.get('invoice_full_text')}")
         
         # Форматируем для фронтенда
         formatted_invoices = []
@@ -604,13 +596,10 @@ def get_invoices_from_buffer(batch_id: str):
     except Exception as e:
         log.error(f"Error getting invoices from buffer: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
-    
-    # backend/main.py - добавляем новый endpoint
 
-class ApplyInvoiceMetadataRequest(BaseModel):
-    invoice_id: str
-    registry_id: int
-    apply_fields: List[str] = ["contractor", "invoice_number", "invoice_date"]  # Какие поля применять
+# -------------------------------------------------------------------
+# APPLY INVOICE METADATA
+# -------------------------------------------------------------------
 
 @app.post("/invoice/apply-metadata")
 def apply_invoice_metadata(payload: ApplyInvoiceMetadataRequest, db: Session = Depends(get_db)):
@@ -640,7 +629,6 @@ def apply_invoice_metadata(payload: ApplyInvoiceMetadataRequest, db: Session = D
             del modified_data["data"]["amount"]
 
     # Применяем с указанием не применять полные метаданные
-    # (фактически применяем только invoice_id и invoice_details)
     registry = apply_invoice_ocr_to_registry(
         db, 
         registry.id, 
@@ -668,13 +656,9 @@ def apply_invoice_metadata(payload: ApplyInvoiceMetadataRequest, db: Session = D
     
     return {"status": "ok", "applied_fields": payload.apply_fields}
 
-# backend/main.py
-
-class ManualInvoiceMatchRequest(BaseModel):
-    batch_id: str
-    registry_id: int
-    invoice_id: str
-    apply_type: str = "full"  # "full", "metadata_only", "amount_only"
+# -------------------------------------------------------------------
+# MANUAL INVOICE MATCH
+# -------------------------------------------------------------------
 
 @app.post("/invoice/manual-match")
 def manual_invoice_match(payload: ManualInvoiceMatchRequest, db: Session = Depends(get_db)):
@@ -735,5 +719,101 @@ def manual_invoice_match(payload: ManualInvoiceMatchRequest, db: Session = Depen
         "registry_id": registry.id,
         "invoice_id": payload.invoice_id,
         "contractor": registry.contractor,
-        "amount": registry.amount
+        "amount": registry.amount,
+        "position": registry.position  #  Возвращаем позицию строки 
     }
+
+# -------------------------------------------------------------------
+# REORDER REGISTRY
+# -------------------------------------------------------------------
+
+@app.post("/registry/reorder")
+def reorder_registry(request: ReorderRequest, db: Session = Depends(get_db)):
+    """
+    Изменение порядка строк в реестре.
+    Принимает массив элементов с id и новой позицией.
+    """
+    print(f"\n=== DEBUG /registry/reorder for batch {request.batch_id} ===")
+    
+    updated_count = 0
+    error_messages = []
+    
+    for item in request.items:
+        try:
+            registry_id = item.get("id")
+            new_position = item.get("position")
+            
+            if not registry_id or new_position is None:
+                error_messages.append(f"Invalid item: {item}")
+                continue
+            
+            print(f"Updating registry_id {registry_id} to position {new_position}")
+            
+            registry = db.query(PaymentRegistry).filter(
+                PaymentRegistry.id == registry_id,
+                PaymentRegistry.imported_batch == request.batch_id
+            ).first()
+            
+            if not registry:
+                error_messages.append(f"Registry item {registry_id} not found in batch {request.batch_id}")
+                continue
+            
+            # Обновляем позицию
+            old_position = registry.position
+            registry.position = new_position
+            updated_count += 1
+            
+            print(f"Updated: id={registry_id}, old={old_position}, new={new_position}")
+            
+        except Exception as e:
+            error_messages.append(f"Error updating registry_id {registry_id}: {str(e)}")
+    
+    db.commit()
+    
+    # Получаем обновленный порядок
+    registry_preview = build_registry_from_batch(db, request.batch_id)
+    
+    response = {
+        "status": "ok",
+        "message": f"Updated {updated_count} items",
+        "updated_count": updated_count,
+        "registry_preview": registry_preview
+    }
+    
+    if error_messages:
+        response["errors"] = error_messages
+    
+    return response
+
+# -------------------------------------------------------------------
+# GET REGISTRY ORDER
+# -------------------------------------------------------------------
+
+@app.get("/registry/{batch_id}/order")
+def get_registry_order(batch_id: str, db: Session = Depends(get_db)):
+    """
+    Получить текущий порядок строк реестра.
+    Возвращает mapping id -> position.
+    """
+    registries = (
+        db.query(PaymentRegistry.id, PaymentRegistry.position)
+        .filter(PaymentRegistry.imported_batch == batch_id)
+        .order_by(PaymentRegistry.position)
+        .all()
+    )
+    
+    order_map = {registry.id: registry.position for registry in registries}
+    
+    return {
+        "batch_id": batch_id,
+        "order": order_map,
+        "total_items": len(registries)
+    }
+
+# -------------------------------------------------------------------
+# ROOT
+# -------------------------------------------------------------------
+
+@app.get("/")
+def root():
+    return {"message": "Registry Control API"}

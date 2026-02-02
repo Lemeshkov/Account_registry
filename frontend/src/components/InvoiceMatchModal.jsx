@@ -1,132 +1,3 @@
-// import React, { useEffect, useState } from "react";
-// import "../index.css";
-
-// const InvoiceMatchModal = ({
-//   invoice,
-//   registryRows,
-//   onClose,
-//   onApplied,
-// }) => {
-//   const [invoiceLines, setInvoiceLines] = useState([]);
-//   const [selectedLine, setSelectedLine] = useState(null);
-//   const [selectedRegistry, setSelectedRegistry] = useState(null);
-//   const [loading, setLoading] = useState(false);
-
-//   useEffect(() => {
-//     fetch(`http://localhost:8000/invoice/${invoice.id}/lines`)
-//       .then((r) => r.json())
-//       .then(setInvoiceLines);
-//   }, [invoice.id]);
-
-//   const apply = async () => {
-//     if (!selectedLine || !selectedRegistry) {
-//       alert("Выберите строку счета и строку реестра");
-//       return;
-//     }
-
-//     setLoading(true);
-
-//     const res = await fetch("http://localhost:8000/invoice/apply-line", {
-//       method: "POST",
-//       headers: { "Content-Type": "application/json" },
-//       body: JSON.stringify({
-//         invoice_id: invoice.id,
-//         line_no: selectedLine.line_no,
-//         registry_id: selectedRegistry.id,
-//       }),
-//     });
-
-//     setLoading(false);
-
-//     if (!res.ok) {
-//       alert("Ошибка применения строки");
-//       return;
-//     }
-
-//     onApplied();
-//     onClose();
-//   };
-
-//  return (
-//   <div className="modal-backdrop">
-//     <div className="modal">
-
-//       {/* ===== HEADER (прибитый) ===== */}
-//       <div className="modal-header">
-//         <h3>🧾 Сопоставление счета</h3>
-
-//         <div className="modal-header-actions">
-//           <button onClick={onClose} className="btn-secondary">
-//             Отмена
-//           </button>
-//           <button
-//             onClick={apply}
-//             disabled={loading || !selectedLine || !selectedRegistry}
-//           >
-//             {loading ? "Применение..." : "Применить"}
-//           </button>
-//         </div>
-//       </div>
-
-//       {/* ===== BODY (скролл) ===== */}
-//       <div className="modal-body">
-//         <div className="modal-grid">
-
-//           {/* ЛЕВАЯ ЧАСТЬ — СЧЕТ */}
-//           <div>
-//             <h4>Строки счета</h4>
-
-//             {invoiceLines.map((l) => (
-//               <div
-//                 key={l.line_no}
-//                 className={`
-//                   select-row
-//                   ${selectedLine?.line_no === l.line_no ? "active" : ""}
-//                   ${l.used ? "used" : ""}
-//                 `}
-//                 onClick={() => !l.used && setSelectedLine(l)}
-//               >
-//                 <b>{l.line_no}</b> {l.description}
-
-//                 <div className="muted">
-//                   {l.quantity} × {l.price} = {l.total}
-//                 </div>
-//               </div>
-//             ))}
-//           </div>
-
-//           {/* ПРАВАЯ ЧАСТЬ — РЕЕСТР */}
-//           <div>
-//             <h4>Строки реестра</h4>
-
-//             {registryRows.map((r) => (
-//               <div
-//                 key={r.id}
-//                 className={`
-//                   select-row
-//                   ${selectedRegistry?.id === r.id ? "active" : ""}
-//                 `}
-//                 onClick={() => setSelectedRegistry(r)}
-//               >
-//                 <b>ID {r.id}</b> {r.vehicle} ({r.license_plate})
-
-//                 <div className="muted">
-//                   Сумма: {r.amount}
-//                 </div>
-//               </div>
-//             ))}
-//           </div>
-
-//         </div>
-//       </div>
-
-//     </div>
-//   </div>
-// );
-
-// };
-
-// export default InvoiceMatchModal;
 
 import React, { useEffect, useState } from "react";
 import "../index.css";
@@ -134,18 +5,35 @@ import "../index.css";
 const InvoiceMatchModal = ({
   invoice,
   registryRows,
+  selectedRegistryRowId,
   onClose,
   onApplied,
+  onManualApply
 }) => {
   const [invoiceLines, setInvoiceLines] = useState([]);
   const [selectedLine, setSelectedLine] = useState(null);
   const [selectedRegistry, setSelectedRegistry] = useState(null);
   const [loading, setLoading] = useState(false);
-  const [applyType, setApplyType] = useState("full"); // "full", "metadata_only", "amount_only"
+  const [applyType, setApplyType] = useState("full");
   const [availableInvoices, setAvailableInvoices] = useState([]);
   const [selectedInvoiceId, setSelectedInvoiceId] = useState(invoice?.id || "");
+  const [isValid, setIsValid] = useState(false);
 
-  // Загружаем строки счета при монтировании
+  // Устанавливаем выбранную строку реестра (только переданную)
+  useEffect(() => {
+    if (registryRows && registryRows.length > 0) {
+      const targetRow = selectedRegistryRowId 
+        ? registryRows.find(r => r.id === selectedRegistryRowId)
+        : registryRows[0];
+      
+      if (targetRow) {
+        setSelectedRegistry(targetRow);
+        console.log("✅ Установлена целевая строка реестра:", targetRow.id);
+      }
+    }
+  }, [registryRows, selectedRegistryRowId]);
+
+  // Загружаем строки счета
   useEffect(() => {
     if (invoice?.id) {
       fetch(`http://localhost:8000/invoice/${invoice.id}/lines`)
@@ -154,7 +42,7 @@ const InvoiceMatchModal = ({
     }
   }, [invoice?.id]);
 
-  // Загружаем все доступные счета для batch
+  // Загружаем доступные счета
   useEffect(() => {
     if (registryRows && registryRows.length > 0) {
       const batchId = registryRows[0].batch_id;
@@ -163,29 +51,11 @@ const InvoiceMatchModal = ({
           .then(r => r.json())
           .then(data => {
             setAvailableInvoices(data.invoices || []);
-            // Если у нас уже выбран счет, проверяем что он в списке
-            if (invoice?.id && !data.invoices?.some(i => i.id === invoice.id)) {
-              // Если счета нет в списке, добавляем его из пропсов
-              setAvailableInvoices(prev => {
-                if (prev.some(i => i.id === invoice.id)) return prev;
-                return [...prev, {
-                  id: invoice.id,
-                  file: invoice.filename || "Текущий счет",
-                  invoice_full_text: invoice.details?.invoice_full_text || 
-                    (invoice.details?.invoice_number && invoice.details?.invoice_date ? 
-                      `Счет на оплату № ${invoice.details.invoice_number} от ${invoice.details.invoice_date}` : 
-                      "Счет без реквизитов"),
-                  contractor: invoice.details?.contractor,
-                  total: invoice.details?.total,
-                  lines_count: invoiceLines.length
-                }];
-              });
-            }
           })
           .catch(err => console.error("Ошибка загрузки счетов:", err));
       }
     }
-  }, [registryRows, invoice, invoiceLines.length]);
+  }, [registryRows]);
 
   // Автоматически выбираем первый счет если не выбран
   useEffect(() => {
@@ -194,91 +64,177 @@ const InvoiceMatchModal = ({
     }
   }, [availableInvoices, selectedInvoiceId]);
 
-  const apply = async () => {
-    if (!selectedRegistry) {
-      alert("Выберите строку реестра для применения счета");
-      return;
+  // Проверяем валидность формы
+  useEffect(() => {
+    // Для применения нужен счет и должна быть выбрана строка реестра
+    const hasInvoice = !!selectedInvoiceId;
+    const hasRegistry = !!selectedRegistry;
+    
+    setIsValid(hasInvoice && hasRegistry);
+  }, [selectedInvoiceId, selectedRegistry, applyType]);
+
+  // В функции apply в InvoiceMatchModal.jsx добавьте:
+const apply = async () => {
+  if (!isValid) {
+    alert("Пожалуйста, выберите счет для привязки");
+    return;
+  }
+
+  const invoiceIdToApply = selectedInvoiceId;
+  if (!invoiceIdToApply) {
+    alert("Не выбран счет для применения");
+    return;
+  }
+
+  setLoading(true);
+
+  try {
+    // Создаем запрос
+    let endpoint, requestBody;
+    const currentBatchId = selectedRegistry.batch_id;
+    
+    if (applyType === "full" && selectedLine) {
+      endpoint = "http://localhost:8000/invoice/apply-line";
+      requestBody = {
+        invoice_id: invoiceIdToApply,
+        line_no: selectedLine.line_no,
+        registry_id: selectedRegistry.id,
+      };
+    } else {
+      endpoint = "http://localhost:8000/invoice/manual-match";
+      requestBody = {
+        batch_id: currentBatchId,
+        registry_id: selectedRegistry.id,
+        invoice_id: invoiceIdToApply,
+        apply_type: applyType
+      };
     }
 
-    const invoiceIdToApply = selectedInvoiceId || invoice?.id;
-    if (!invoiceIdToApply) {
-      alert("Не выбран счет для применения");
-      return;
+    console.log("📤 Отправка запроса:", { endpoint, requestBody });
+
+    const res = await fetch(endpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(requestBody),
+    });
+
+    if (!res.ok) {
+      const errorText = await res.text();
+      throw new Error(`HTTP ${res.status}: ${errorText}`);
     }
 
-    setLoading(true);
-
-    try {
-      // Определяем тип применения
-      let endpoint;
-      let requestBody;
-
-      if (applyType === "full" && selectedLine) {
-        // Полное применение с конкретной строкой счета
-        endpoint = "http://localhost:8000/invoice/apply-line";
-        requestBody = {
-          invoice_id: invoiceIdToApply,
-          line_no: selectedLine.line_no,
-          registry_id: selectedRegistry.id,
-        };
-      } else {
-        // Применение через новый endpoint для разных типов
-        endpoint = "http://localhost:8000/invoice/manual-match";
-        requestBody = {
-          batch_id: selectedRegistry.batch_id || registryRows[0]?.batch_id,
-          registry_id: selectedRegistry.id,
-          invoice_id: invoiceIdToApply,
-          apply_type: applyType
-        };
-      }
-
-      const res = await fetch(endpoint, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(requestBody),
-      });
-
-      if (!res.ok) {
-        const errorText = await res.text();
-        throw new Error(`HTTP ${res.status}: ${errorText}`);
-      }
-
-      const result = await res.json();
+    const result = await res.json();
+    
+    if (result.status === "ok") {
+      // Вызываем onManualApply для локального обновления
+      await onManualApply(invoiceIdToApply, selectedRegistry.id, applyType, selectedLine?.line_no);
       
-      if (result.status === "ok") {
-        alert(`Счет успешно применен!`);
-        onApplied();
-        onClose();
-      } else {
-        alert("Ошибка: " + (result.message || "Неизвестная ошибка"));
-      }
-    } catch (error) {
-      console.error("Ошибка применения счета:", error);
-      alert(`Ошибка применения счета: ${error.message}`);
-    } finally {
-      setLoading(false);
+      // Закрываем модалку
+      onClose();
+    } else {
+      alert("❌ Ошибка: " + (result.message || "Неизвестная ошибка"));
     }
-  };
+  } catch (error) {
+    console.error("❌ Ошибка применения счета:", error);
+    alert(`❌ Ошибка привязки счета: ${error.message}`);
+  } finally {
+    setLoading(false);
+  }
+};
+
+  // const apply = async () => {
+  //   if (!isValid) {
+  //     alert("Пожалуйста, выберите счет для привязки");
+  //     return;
+  //   }
+
+  //   const invoiceIdToApply = selectedInvoiceId;
+  //   if (!invoiceIdToApply) {
+  //     alert("Не выбран счет для применения");
+  //     return;
+  //   }
+
+  //   setLoading(true);
+
+  //   try {
+  //     // Создаем запрос
+  //     let endpoint, requestBody;
+  //     const currentBatchId = selectedRegistry.batch_id;
+      
+  //     if (applyType === "full" && selectedLine) {
+  //       // Полное применение с конкретной строкой счета
+  //       endpoint = "http://localhost:8000/invoice/apply-line";
+  //       requestBody = {
+  //         invoice_id: invoiceIdToApply,
+  //         line_no: selectedLine.line_no,
+  //         registry_id: selectedRegistry.id,
+  //       };
+  //     } else {
+  //       // Применение через новый endpoint для разных типов
+  //       endpoint = "http://localhost:8000/invoice/manual-match";
+  //       requestBody = {
+  //         batch_id: currentBatchId,
+  //         registry_id: selectedRegistry.id,
+  //         invoice_id: invoiceIdToApply,
+  //         apply_type: applyType
+  //       };
+  //     }
+
+  //     console.log("📤 Отправка запроса:", { endpoint, requestBody });
+
+  //     const res = await fetch(endpoint, {
+  //       method: "POST",
+  //       headers: { "Content-Type": "application/json" },
+  //       body: JSON.stringify(requestBody),
+  //     });
+
+  //     if (!res.ok) {
+  //       const errorText = await res.text();
+  //       throw new Error(`HTTP ${res.status}: ${errorText}`);
+  //     }
+
+  //     const result = await res.json();
+      
+  //     if (result.status === "ok") {
+  //       alert(`✅ Счет успешно привязан к строке ID ${selectedRegistry.id}!`);
+  //       onApplied();
+  //       onClose();
+  //     } else {
+  //       alert("❌ Ошибка: " + (result.message || "Неизвестная ошибка"));
+  //     }
+  //   } catch (error) {
+  //     console.error("❌ Ошибка применения счета:", error);
+  //     alert(`❌ Ошибка привязки счета: ${error.message}`);
+  //   } finally {
+  //     setLoading(false);
+  //   }
+  // };
 
   // Получаем выбранный счет
   const selectedInvoice = availableInvoices.find(i => i.id === selectedInvoiceId) || invoice;
 
   return (
     <div className="modal-backdrop">
-      <div className="modal">
+      <div className="modal invoice-match-modal">
         {/* ===== HEADER ===== */}
         <div className="modal-header">
-          <h3>🧾 Сопоставление счета</h3>
+          <div className="modal-header-left">
+            <h3>🎯 Привязка счета к строке реестра</h3>
+            <div className="modal-subtitle">
+              Выбрана строка реестра: <strong>ID {selectedRegistry?.id}</strong>
+              {selectedRegistry?.vehicle && ` (${selectedRegistry.vehicle})`}
+            </div>
+          </div>
           <div className="modal-header-actions">
             <button onClick={onClose} className="btn-secondary">
               Отмена
             </button>
             <button
               onClick={apply}
-              disabled={loading || !selectedRegistry}
+              disabled={loading || !isValid}
               className="btn-primary"
             >
-              {loading ? "Применение..." : "Применить"}
+              {loading ? "⏳ Привязка..." : "✅ Привязать счет"}
             </button>
           </div>
         </div>
@@ -286,206 +242,347 @@ const InvoiceMatchModal = ({
         {/* ===== BODY ===== */}
         <div className="modal-body">
           
-          {/* ВЫБОР СЧЕТА */}
+          {/* СЕКЦИЯ 1: ИНФОРМАЦИЯ О ВЫБРАННОЙ СТРОКЕ РЕЕСТРА */}
           <div className="section">
-            <h4>Выберите счет</h4>
-            <div className="invoice-selector">
-              <select
-                value={selectedInvoiceId}
-                onChange={(e) => setSelectedInvoiceId(e.target.value)}
-                className="full-width-select"
-              >
-                {availableInvoices.map((inv) => (
-                  <option key={inv.id} value={inv.id}>
-                    {inv.file} - {inv.invoice_full_text || "Счет без реквизитов"}
-                    {inv.contractor ? ` (${inv.contractor})` : ""}
-                  </option>
-                ))}
-              </select>
-            </div>
+            <h4 className="section-title">
+              <span className="section-icon">📋</span>
+              Целевая строка реестра
+              <span className="selection-badge">Предварительно выбрана</span>
+            </h4>
             
-            {/* ИНФОРМАЦИЯ О ВЫБРАННОМ СЧЕТЕ */}
-            {selectedInvoice && (
-              <div className="invoice-info-card">
-                <div className="info-row">
-                  <span className="info-label">Реквизиты:</span>
-                  <span className="info-value">
-                    {selectedInvoice.invoice_full_text || 
-                      (selectedInvoice.details?.invoice_number && selectedInvoice.details?.invoice_date ?
-                        `Счет на оплату № ${selectedInvoice.details.invoice_number} от ${selectedInvoice.details.invoice_date}` :
-                        "Реквизиты не указаны")}
+            <div className="selected-registry-info">
+              <div className="registry-info-grid">
+                <div className="registry-info-item">
+                  <span className="registry-info-label">ID строки:</span>
+                  <span className="registry-info-value id">{selectedRegistry?.id}</span>
+                </div>
+                <div className="registry-info-item">
+                  <span className="registry-info-label">Техника:</span>
+                  <span className="registry-info-value">{selectedRegistry?.vehicle || "Не указана"}</span>
+                </div>
+                <div className="registry-info-item">
+                  <span className="registry-info-label">Госномер:</span>
+                  <span className="registry-info-value">{selectedRegistry?.license_plate || "Не указан"}</span>
+                </div>
+                <div className="registry-info-item">
+                  <span className="registry-info-label">Контрагент:</span>
+                  <span className="registry-info-value">{selectedRegistry?.contractor || "Не указан"}</span>
+                </div>
+                <div className="registry-info-item">
+                  <span className="registry-info-label">Сумма:</span>
+                  <span className="registry-info-value amount">
+                    {selectedRegistry?.amount || "0,00"}
                   </span>
                 </div>
-                <div className="info-row">
-                  <span className="info-label">Контрагент:</span>
-                  <span className="info-value">
-                    {selectedInvoice.contractor || selectedInvoice.details?.contractor || "Не указан"}
-                  </span>
-                </div>
-                <div className="info-row">
-                  <span className="info-label">Сумма:</span>
-                  <span className="info-value">
-                    {selectedInvoice.total || selectedInvoice.details?.total || "Не указана"}
+                <div className="registry-info-item">
+                  <span className="registry-info-label">Привязанный счет:</span>
+                  <span className="registry-info-value">
+                    {selectedRegistry?.invoice_id ? `Да (ID: ${selectedRegistry.invoice_id.slice(0, 8)}...)` : "Нет"}
                   </span>
                 </div>
               </div>
-            )}
-          </div>
-
-          {/* ВЫБОР ТИПА ПРИМЕНЕНИЯ */}
-          <div className="section">
-            <h4>Тип применения</h4>
-            <div className="apply-type-selector">
-              <label className="apply-type-option">
-                <input
-                  type="radio"
-                  name="applyType"
-                  value="full"
-                  checked={applyType === "full"}
-                  onChange={(e) => setApplyType(e.target.value)}
-                />
-                <div className="option-content">
-                  <strong>Полное применение</strong>
-                  <small>Реквизиты + сумма из выбранной строки счета</small>
-                </div>
-              </label>
               
-              <label className="apply-type-option">
-                <input
-                  type="radio"
-                  name="applyType"
-                  value="metadata_only"
-                  checked={applyType === "metadata_only"}
-                  onChange={(e) => setApplyType(e.target.value)}
-                />
-                <div className="option-content">
-                  <strong>Только реквизиты</strong>
-                  <small>Номер, дата, контрагент (сумма не изменится)</small>
-                </div>
-              </label>
-              
-              <label className="apply-type-option">
-                <input
-                  type="radio"
-                  name="applyType"
-                  value="amount_only"
-                  checked={applyType === "amount_only"}
-                  onChange={(e) => setApplyType(e.target.value)}
-                />
-                <div className="option-content">
-                  <strong>Только сумма</strong>
-                  <small>Только сумма из счета (реквизиты не изменятся)</small>
-                </div>
-              </label>
+              <div className="registry-note">
+                <span className="note-icon">ℹ️</span>
+                <span className="note-text">
+                  Эта строка была выбрана в таблице реестра. При нажатии "Привязать счет" выбранный ниже счет будет привязан именно к этой строке.
+                </span>
+              </div>
             </div>
           </div>
 
-          <div className="modal-grid">
-            {/* ЛЕВАЯ ЧАСТЬ — СТРОКИ СЧЕТА (только для полного применения) */}
-            {applyType === "full" && (
-              <div className="section">
-                <h4>Строки счета</h4>
-                <div className="scrollable-list">
-                  {invoiceLines.length > 0 ? (
-                    invoiceLines.map((l) => (
-                      <div
-                        key={l.line_no}
-                        className={`
-                          select-row
-                          ${selectedLine?.line_no === l.line_no ? "active" : ""}
-                          ${l.used ? "used" : ""}
-                        `}
-                        onClick={() => !l.used && setSelectedLine(l)}
-                      >
-                        <div className="row-header">
-                          <b>Строка {l.line_no}</b>
-                          {l.used && <span className="used-badge">Использована</span>}
-                        </div>
-                        <div className="row-description">{l.description}</div>
-                        <div className="row-details">
-                          {l.quantity} × {l.price} = <strong>{l.total}</strong>
-                        </div>
-                      </div>
-                    ))
-                  ) : (
-                    <div className="empty-state">
-                      <p>Строки счета не найдены</p>
-                      <small>При полном применении будет использована общая сумма счета</small>
+          {/* СЕКЦИЯ 2: ВЫБОР СЧЕТА */}
+          <div className="section">
+            <h4 className="section-title">
+              <span className="section-icon">📄</span>
+              Выберите счет для привязки
+              <span className="required-badge">Обязательно</span>
+            </h4>
+            
+            <div className="invoice-selector-container">
+              <div className="selector-header">
+                <span>Доступные счета из буфера:</span>
+                <span className="count-badge">{availableInvoices.length} шт.</span>
+              </div>
+              
+              {availableInvoices.length > 0 ? (
+                <>
+                  <select
+                    value={selectedInvoiceId}
+                    onChange={(e) => setSelectedInvoiceId(e.target.value)}
+                    className="invoice-select"
+                    required
+                  >
+                    <option value="">-- Выберите счет --</option>
+                    {availableInvoices.map((inv) => (
+                      <option key={inv.id} value={inv.id}>
+                        {inv.invoice_full_text || inv.file || `Счет ${inv.id.slice(0, 8)}`}
+                        {inv.contractor ? ` — ${inv.contractor}` : ''}
+                      </option>
+                    ))}
+                  </select>
+                  
+                  {/* Валидация */}
+                  {!selectedInvoiceId && (
+                    <div className="validation-error">
+                      ⚠️ Пожалуйста, выберите счет для привязки
                     </div>
                   )}
+                </>
+              ) : (
+                <div className="empty-invoices">
+                  <div className="empty-icon">📭</div>
+                  <div className="empty-text">
+                    <p>Нет доступных счетов в буфере</p>
+                    <small>Загрузите PDF-счета, чтобы они появились в этом списке</small>
+                  </div>
+                </div>
+              )}
+            </div>
+            
+            {/* Информация о выбранном счете */}
+            {selectedInvoice && selectedInvoiceId && (
+              <div className="selected-invoice-info">
+                <h5>Информация о выбранном счете:</h5>
+                <div className="info-grid">
+                  <div className="info-item">
+                    <span className="info-label">Реквизиты:</span>
+                    <span className="info-value">
+                      {selectedInvoice.invoice_full_text || 
+                       selectedInvoice.details?.invoice_full_text || 
+                       "Реквизиты не указаны"}
+                    </span>
+                  </div>
+                  <div className="info-item">
+                    <span className="info-label">Контрагент:</span>
+                    <span className="info-value">
+                      {selectedInvoice.contractor || selectedInvoice.details?.contractor || "Не указан"}
+                    </span>
+                  </div>
+                  <div className="info-item">
+                    <span className="info-label">Сумма:</span>
+                    <span className="info-value amount">
+                      {selectedInvoice.total || selectedInvoice.details?.total || "Не указана"}
+                    </span>
+                  </div>
                 </div>
               </div>
             )}
+          </div>
 
-            {/* ПРАВАЯ ЧАСТЬ — СТРОКИ РЕЕСТРА */}
-            <div className="section">
-              <h4>Строки реестра</h4>
-              <div className="scrollable-list">
-                {registryRows.map((r) => (
-                  <div
-                    key={r.id}
-                    className={`
-                      select-row
-                      ${selectedRegistry?.id === r.id ? "active" : ""}
-                      ${r.invoice_id ? "has-invoice" : ""}
-                    `}
-                    onClick={() => setSelectedRegistry(r)}
-                  >
-                    <div className="row-header">
-                      <b>ID {r.id}</b>
-                      {r.invoice_id && <span className="invoice-badge">Счет привязан</span>}
+          {/* СЕКЦИЯ 3: ТИП ПРИВЯЗКИ */}
+          <div className="section">
+            <h4 className="section-title">
+              <span className="section-icon">⚙️</span>
+              Настройки привязки
+            </h4>
+            
+            <div className="apply-type-selector">
+              <div className="apply-type-options">
+                <label className={`apply-type-option ${applyType === "full" ? "active" : ""}`}>
+                  <input
+                    type="radio"
+                    name="applyType"
+                    value="full"
+                    checked={applyType === "full"}
+                    onChange={(e) => setApplyType(e.target.value)}
+                  />
+                  <div className="option-content">
+                    <div className="option-title">
+                      <span className="option-icon">📋</span>
+                      Полная привязка
                     </div>
-                    <div className="row-description">
-                      {r.vehicle || "Без названия"} ({r.license_plate || "без номера"})
-                    </div>
-                    <div className="row-details">
-                      {r.contractor && <div>Контрагент: {r.contractor}</div>}
-                      {r.amount && <div>Сумма: <strong>{r.amount}</strong></div>}
-                      {r.invoice_details?.invoice_number && (
-                        <div>Счет: № {r.invoice_details.invoice_number}</div>
-                      )}
+                    <div className="option-description">
+                      Реквизиты счета (номер, дата, контрагент) + общая сумма счета
                     </div>
                   </div>
-                ))}
+                </label>
+                
+                <label className={`apply-type-option ${applyType === "metadata_only" ? "active" : ""}`}>
+                  <input
+                    type="radio"
+                    name="applyType"
+                    value="metadata_only"
+                    checked={applyType === "metadata_only"}
+                    onChange={(e) => setApplyType(e.target.value)}
+                  />
+                  <div className="option-content">
+                    <div className="option-title">
+                      <span className="option-icon">📄</span>
+                      Только реквизиты
+                    </div>
+                    <div className="option-description">
+                      Только реквизиты счета (номер, дата, контрагент). Сумма останется прежней.
+                    </div>
+                  </div>
+                </label>
+                
+                <label className={`apply-type-option ${applyType === "amount_only" ? "active" : ""}`}>
+                  <input
+                    type="radio"
+                    name="applyType"
+                    value="amount_only"
+                    checked={applyType === "amount_only"}
+                    onChange={(e) => setApplyType(e.target.value)}
+                  />
+                  <div className="option-content">
+                    <div className="option-title">
+                      <span className="option-icon">💰</span>
+                      Только сумма
+                    </div>
+                    <div className="option-description">
+                      Только общая сумма из счета. Реквизиты останутся прежними.
+                    </div>
+                  </div>
+                </label>
+              </div>
+            </div>
+            
+            {/* Описание выбранного типа */}
+            <div className="apply-type-description">
+              <div className="description-content">
+                <strong>Будет обновлено:</strong>
+                <ul>
+                  {applyType === "full" && (
+                    <>
+                      <li>Номер и дата счета</li>
+                      <li>Контрагент</li>
+                      <li>Общая сумма счета</li>
+                    </>
+                  )}
+                  {applyType === "metadata_only" && (
+                    <>
+                      <li>Номер и дата счета</li>
+                      <li>Контрагент</li>
+                      <li>Сумма останется: {selectedRegistry?.amount || "0,00"}</li>
+                    </>
+                  )}
+                  {applyType === "amount_only" && (
+                    <>
+                      <li>Общая сумма счета</li>
+                      <li>Реквизиты останутся прежними</li>
+                    </>
+                  )}
+                </ul>
               </div>
             </div>
           </div>
 
-          {/* ИНФОРМАЦИЯ О ВЫБРАННЫХ ЭЛЕМЕНТАХ */}
-          {(selectedRegistry || selectedLine) && (
-            <div className="selection-summary">
-              <h4>Будет применено:</h4>
-              <div className="summary-grid">
-                {selectedRegistry && (
-                  <div className="summary-item">
-                    <div className="summary-label">К строке реестра:</div>
-                    <div className="summary-value">
-                      ID {selectedRegistry.id} - {selectedRegistry.vehicle} ({selectedRegistry.license_plate})
-                    </div>
-                  </div>
-                )}
+          {/* СЕКЦИЯ 4: СТРОКИ СЧЕТА (только для информации) */}
+          {applyType === "full" && invoiceLines.length > 0 && (
+            <div className="section">
+              <h4 className="section-title">
+                <span className="section-icon">📝</span>
+                Строки выбранного счета
+                <span className="section-subtitle">Для информации</span>
+              </h4>
+              
+              <div className="invoice-lines-container">
+                <div className="lines-header">
+                  <span>Найдено строк: {invoiceLines.length}</span>
+                  <span className="hint-text">При полной привязке используется общая сумма счета</span>
+                </div>
                 
-                {applyType === "full" && selectedLine && (
-                  <div className="summary-item">
-                    <div className="summary-label">Строка счета:</div>
-                    <div className="summary-value">
-                      Строка {selectedLine.line_no}: {selectedLine.description} ({selectedLine.total})
+                <div className="lines-list">
+                  {invoiceLines.map((l) => (
+                    <div
+                      key={l.line_no}
+                      className={`invoice-line ${selectedLine?.line_no === l.line_no ? "selected" : ""} ${l.used ? "used" : ""}`}
+                      onClick={() => !l.used && setSelectedLine(l)}
+                    >
+                      <div className="line-header">
+                        <div className="line-number">
+                          <span className="number">Строка {l.line_no}</span>
+                          {l.used && <span className="used-badge">Использована</span>}
+                        </div>
+                        <div className="line-amount">{l.total}</div>
+                      </div>
+                      <div className="line-description">{l.description || "Без описания"}</div>
+                      {l.quantity && l.price && (
+                        <div className="line-details">
+                          {l.quantity} × {l.price} = {l.total}
+                        </div>
+                      )}
                     </div>
-                  </div>
-                )}
-                
-                <div className="summary-item">
-                  <div className="summary-label">Тип применения:</div>
-                  <div className="summary-value">
-                    {applyType === "full" ? "Полное (реквизиты + сумма)" : 
-                     applyType === "metadata_only" ? "Только реквизиты" : 
-                     "Только сумма"}
-                  </div>
+                  ))}
                 </div>
               </div>
             </div>
           )}
 
+          {/* СЕКЦИЯ 5: ИТОГОВАЯ ИНФОРМАЦИЯ */}
+          <div className="section summary-section">
+            <h4 className="section-title">
+              <span className="section-icon">✅</span>
+              Итог привязки
+            </h4>
+            
+            <div className="summary-card">
+              <div className="summary-row">
+                <div className="summary-label">Строка реестра:</div>
+                <div className="summary-value">
+                  <strong className="registry-id">ID {selectedRegistry?.id}</strong>
+                  <span className="registry-details">
+                    {selectedRegistry?.vehicle || "Без названия"}
+                    {selectedRegistry?.license_plate && ` (${selectedRegistry.license_plate})`}
+                  </span>
+                </div>
+              </div>
+              
+              <div className="summary-row">
+                <div className="summary-label">Счет:</div>
+                <div className="summary-value">
+                  {selectedInvoice && selectedInvoiceId ? (
+                    <>
+                      <strong>{selectedInvoice.invoice_full_text || "Счет без реквизитов"}</strong>
+                      <span className="invoice-contractor">
+                        {selectedInvoice.contractor || selectedInvoice.details?.contractor}
+                      </span>
+                      <span className="invoice-amount">
+                        {selectedInvoice.total || selectedInvoice.details?.total}
+                      </span>
+                    </>
+                  ) : (
+                    <span className="no-selection">Не выбран</span>
+                  )}
+                </div>
+              </div>
+              
+              <div className="summary-row">
+                <div className="summary-label">Тип привязки:</div>
+                <div className="summary-value">
+                  <span className="type-badge">
+                    {applyType === "full" ? "📋 Полная" : 
+                     applyType === "metadata_only" ? "📄 Только реквизиты" : 
+                     "💰 Только сумма"}
+                  </span>
+                </div>
+              </div>
+              
+              <div className="summary-action">
+                <button
+                  onClick={apply}
+                  disabled={loading || !isValid}
+                  className="apply-button"
+                >
+                  {loading ? (
+                    <>
+                      <span className="spinner"></span>
+                      Привязка...
+                    </>
+                  ) : (
+                    `✅ Привязать счет к строке ID ${selectedRegistry?.id}`
+                  )}
+                </button>
+                
+                {!isValid && (
+                  <div className="validation-hint">
+                    ⚠️ Для привязки необходимо выбрать счет из списка
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </div>

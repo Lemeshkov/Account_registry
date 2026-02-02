@@ -1,6 +1,8 @@
+
+
 import pandas as pd
 from datetime import datetime
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Tuple
 import logging
 from xlsx2csv import Xlsx2csv
 from io import StringIO
@@ -13,16 +15,20 @@ class ExcelParser:
     Супер-надёжный парсер Excel (читает ДАЖЕ битые xlsx через CSV)
     """
 
-    def parse_file(self, file_path: str) -> List[Dict[str, Any]]:
+    def parse_file_with_positions(self, file_path: str) -> List[Tuple[Dict[str, Any], int]]:
+        """
+        Парсит Excel файл и возвращает список кортежей (данные_строки, позиция_в_excel)
+        Полезно для сохранения исходного порядка строк.
+        """
         df = None
 
-        # 1️⃣ обычный путь
+        # 1 обычный путь
         try:
             df = pd.read_excel(file_path, header=None)
         except Exception as e:
             log.warning(f"pandas failed: {e}")
 
-        # 2️⃣ АБСОЛЮТНО НАДЁЖНЫЙ FALLBACK
+        # 2 АБСОЛЮТНО НАДЁЖНЫЙ FALLBACK
         if df is None:
             try:
                 output = StringIO()
@@ -38,9 +44,9 @@ class ExcelParser:
 
         df = df.dropna(how="all")
 
-        results: List[Dict[str, Any]] = []
+        results: List[Tuple[Dict[str, Any], int]] = []
 
-        for _, row in df.iterrows():
+        for idx, (_, row) in enumerate(df.iterrows()):
             try:
                 if not row[0] or not str(row[0]).strip().isdigit():
                     continue
@@ -57,12 +63,16 @@ class ExcelParser:
                     "completion_date": self._parse_date(row[8]) if len(row) > 8 else None,
                 }
 
-                results.append(record)
+                results.append((record, idx))
 
             except Exception as e:
-                log.warning(f"Row skipped: {e}")
+                log.warning(f"Row skipped (row {idx}): {e}")
 
         return results
+
+    def parse_file(self, file_path: str) -> List[Dict[str, Any]]:
+        """Совместимый метод, возвращает только данные без позиций"""
+        return [record for record, _ in self.parse_file_with_positions(file_path)]
 
     def _safe(self, value):
         return str(value).strip() if value not in (None, "", "nan") else None
