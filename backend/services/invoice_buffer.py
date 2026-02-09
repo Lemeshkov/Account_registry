@@ -78,21 +78,65 @@ def remove_invoice(invoice_id: str):
     INVOICE_BUFFER.pop(invoice_id, None)
 
 def save_invoice_lines(db: Session, invoice_id: str, batch_id: str, lines: list[dict]):
+    """Сохраняет строки счета в базу данных"""
+    print(f"\n[BUFFER DEBUG] save_invoice_lines called:")
+    print(f"  Invoice ID: {invoice_id}")
+    print(f"  Batch ID: {batch_id}")
+    print(f"  Lines count: {len(lines)}")
+    
+    saved_count = 0
     for l in lines:
-        db.add(
-            InvoiceLine(
+        try:
+            print(f"  Processing line: line_no={l.get('line_no')}, desc='{l.get('description', '')[:30]}...'")
+            
+            # Преобразуем quantity в int (из float qty)
+            qty_value = l.get("qty", 1)
+            if isinstance(qty_value, float):
+                quantity = int(qty_value)
+            elif isinstance(qty_value, (int, str)):
+                try:
+                    quantity = int(float(qty_value))
+                except:
+                    quantity = 1
+            else:
+                quantity = 1
+            
+            print(f"    qty={qty_value} -> quantity={quantity}")
+            
+            # Парсим цену и сумму
+            price_value = parse_number(l["price"]) if l.get("price") else 0
+            total_value = parse_number(l["total"]) if l.get("total") else 0
+            
+            print(f"    price='{l.get('price')}' -> {price_value}")
+            print(f"    total='{l.get('total')}' -> {total_value}")
+            
+            invoice_line = InvoiceLine(
                 invoice_id=invoice_id,
                 batch_id=batch_id,
                 line_no=l["line_no"],
                 description=l["description"],
-                quantity=l["qty"],
-                price=parse_number(l["price"]),
-                total=parse_number(l["total"]),
+                quantity=quantity,  # Теперь int
+                price=price_value,
+                total=total_value,
                 raw=l.get("raw"),
                 used=False,
             )
-        )
-    db.flush()
+            
+            db.add(invoice_line)
+            saved_count += 1
+            print(f"    ✅ Line added to session")
+            
+        except Exception as e:
+            print(f"    ❌ Error saving line: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    try:
+        db.flush()
+        print(f"[BUFFER DEBUG] Successfully flushed {saved_count} lines to database")
+    except Exception as e:
+        print(f"[BUFFER DEBUG] Flush failed: {e}")
+        raise
 
 def get_invoice_lines(db: Session, invoice_id: str):
     return (

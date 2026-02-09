@@ -1567,31 +1567,31 @@
 
     #------------------------------------------новый универсальный тест
     #-----------------------------------------------------------------
+
+
+#---------------------------------гибридный парсер
 """
-Главный парсер счетов - обновленная версия
+Главный парсер счетов - ТОЛЬКО для вызова других парсеров
+1. universal_parser для метаданных
+2. legacy_parser для товаров
 """
 
 import os
 from typing import Dict, Any, List
 from backend.services.ocr_service_fast import ocr_pdf_fast as ocr_pdf
-
+from .legacy_invoice_parser import parse_invoice_lines_legacy
 from .universal_parser import extract_metadata_universal
-from .parser_manager import ParserManager
-
+from .legacy_invoice_parser import parse_invoice_lines_only
+from .legacy_invoice_parser import parse_this_specific_invoice
 
 def parse_invoice_from_pdf(pdf_path: str, excel_record: Dict[str, Any] = None) -> Dict[str, Any]:
     """
-    Парсит PDF-счет, может использовать данные из Excel для улучшения парсинга.
-    
-    Args:
-        pdf_path: путь к PDF-счету
-        excel_record: данные из Excel (опционально, для улучшения парсинга)
-        
-    Returns:
-        Dict с данными счета
+    ГЛАВНЫЙ ПАРСЕР:
+    1. universal_parser для метаданных (всегда работает)
+    2. legacy_parser ТОЛЬКО для товаров
     """
     print(f"\n{'='*60}")
-    print(f"PROCESSING PDF: {os.path.basename(pdf_path)}")
+    print(f"MAIN INVOICE PARSER: {os.path.basename(str(pdf_path))}")
     print(f"{'='*60}")
     
     # 1. Получаем текст из PDF
@@ -1601,45 +1601,40 @@ def parse_invoice_from_pdf(pdf_path: str, excel_record: Dict[str, Any] = None) -
     
     full_text = "\n\n".join(pages)
     
-    # 2. ВСЕГДА парсим метаданные
-    print("\n--- EXTRACTING METADATA (ALWAYS WORKS) ---")
+    # 2. Используем universal_parser ТОЛЬКО для метаданных
+    print("\n--- EXTRACTING METADATA (UNIVERSAL PARSER) ---")
     metadata = extract_metadata_universal(full_text)
     
-    # 3. Если есть данные из Excel, добавляем их для контекста
-    if excel_record:
-        metadata['excel_context'] = {
-            'item_name': excel_record.get('item_name'),
-            'article': excel_record.get('article'),
-            'quantity': excel_record.get('quantity'),
-        }
+    # 3. Используем legacy_parser ТОЛЬКО для товаров
+    print("\n--- PARSING PRODUCT LINES (LEGACY PARSER) ---")
     
-    # 4. Парсим таблицу товаров
-    print("\n--- PARSING PRODUCT LINES ---")
-    parser_manager = ParserManager()
+    product_lines = []
+    try:
+        # legacy_parser теперь ВОЗВРАЩАЕТ ТОЛЬКО СТРОКИ ТОВАРОВ
+        product_lines = parse_this_specific_invoice(full_text)
+        if product_lines:
+            print(f"✓ Legacy parser found {len(product_lines)} product lines")
+        else:
+            print("✗ Legacy parser found 0 lines")
+    except Exception as e:
+        print(f"✗ Legacy parser error: {e}")
+        # Продолжаем работу даже если legacy парсер упал
     
-    # Если есть данные из Excel, можем улучшить парсинг
-    if excel_record and excel_record.get('item_name'):
-        # Добавляем поисковый контекст
-        enhanced_text = _enhance_with_excel_context(full_text, excel_record)  # Убрал self.
-        product_lines = parser_manager.parse_table_lines(enhanced_text)
-    else:
-        product_lines = parser_manager.parse_table_lines(full_text)
-    
-    # 5. Рассчитываем confidence
+    # 4. Рассчитываем confidence
     confidence = calculate_confidence(metadata, product_lines, excel_record)
     
-    # 6. Формируем результат
+    # 5. Формируем результат
     result = {
         "data": metadata,
         "lines": product_lines,
         "confidence": confidence,
-        "source_file": os.path.basename(pdf_path),
+        "source_file": os.path.basename(str(pdf_path)),
         "excel_match": bool(excel_record),
     }
     
     # Логируем результат
     print(f"\n{'='*60}")
-    print("INVOICE PARSING RESULT:")
+    print("MAIN PARSING RESULT:")
     print(f"{'='*60}")
     print(f"✓ Метаданные: {'Найдены' if metadata.get('metadata_found') else 'Не найдены'}")
     print(f"✓ Товаров в счете: {len(product_lines)}")
@@ -1649,27 +1644,6 @@ def parse_invoice_from_pdf(pdf_path: str, excel_record: Dict[str, Any] = None) -
         print(f"✓ Связь с Excel: Заявка №{excel_record.get('request_number')}")
     
     return result
-
-
-def _enhance_with_excel_context(text: str, excel_record: Dict[str, Any]) -> str:
-    """
-    Улучшает текст для парсинга с использованием данных из Excel.
-    Например, добавляет ключевые слова для поиска товара.
-    """
-    enhanced = text
-    
-    # Добавляем название товара из Excel как подсказку
-    item_name = excel_record.get('item_name')
-    if item_name:
-        # Добавляем в начало текста для улучшения поиска
-        enhanced = f"ИСКОМЫЙ ТОВАР: {item_name}\n" + enhanced
-    
-    # Также можно добавить другие поля для поиска
-    article = excel_record.get('article')
-    if article:
-        enhanced = f"ИСКОМЫЙ АРТИКУЛ: {article}\n" + enhanced
-    
-    return enhanced
 
 
 def calculate_confidence(metadata: Dict[str, Any], 
@@ -1697,7 +1671,6 @@ def calculate_confidence(metadata: Dict[str, Any],
     
     # 3. Бонус за соответствие с Excel
     if excel_record and excel_record.get('item_name') and lines:
-        # Проверяем, есть ли в счете товар похожий на указанный в Excel
         item_found = any(excel_record['item_name'].lower() in line.get('description', '').lower() 
                         for line in lines[:5])
         if item_found:

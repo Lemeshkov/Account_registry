@@ -71,6 +71,17 @@ class ReorderRequest(BaseModel):
     batch_id: str
     items: List[Dict[str, Any]]  # [{id: 1, position: 0}, {id: 2, position: 1}, ...]
 
+class ApplyMultipleLinesRequest(BaseModel):
+    invoice_id: str
+    line_nos: List[int]
+    registry_id: int
+    batch_id: str
+
+class ApplyAllLinesRequest(BaseModel):
+    invoice_id: str
+    registry_id: int
+    batch_id: str    
+
 @app.on_event("startup")
 def on_startup():
     Base.metadata.create_all(bind=engine)
@@ -92,27 +103,99 @@ app.mount("/uploads", StaticFiles(directory=BASE_UPLOAD_DIR), name="uploads")
 # BACKGROUND OCR TASK
 # -------------------------------------------------------------------
 
+# def process_invoice_pdf_background(file_path: Path, batch_id: str):
+#     db = SessionLocal()
+#     try:
+#         # 1. Парсим PDF
+#         parsed = parse_invoice_from_pdf(file_path)
+#         if not parsed:
+#             log.error("[OCR] Failed to parse PDF: %s", file_path.name)
+#             return
+        
+#         print(f"\n=== DEBUG: parse_invoice_from_pdf result ===")
+#         print(f"Contractor: {parsed.get('data', {}).get('contractor')}")
+#         print(f"Invoice number: {parsed.get('data', {}).get('invoice_number')}")
+#         print(f"Invoice date: {parsed.get('data', {}).get('invoice_date')}")
+        
+#         # 2. Добавляем ID и информацию о batch
+#         invoice_id = str(uuid.uuid4())
+#         parsed["id"] = invoice_id
+#         parsed["batch_id"] = batch_id
+#         parsed["file"] = file_path.name
+        
+#         # 3. ВСЕГДА сохраняем строки счета в базу
+#         if parsed.get("lines"):
+#             log.info("[OCR] Saving %d invoice lines to database", len(parsed["lines"]))
+#             save_invoice_lines(
+#                 db,
+#                 invoice_id=invoice_id,
+#                 batch_id=batch_id,
+#                 lines=parsed.get("lines", []),
+#             )
+#         else:
+#             log.warning("[OCR] No product lines found in invoice")
+        
+#         # 4. ВСЕГДА сохраняем счет в буфер (для предпросмотра)
+#         print(f"\n=== DEBUG: Adding to buffer ===")
+#         print(f"Invoice ID: {invoice_id}")
+        
+#         # ОБЕСПЕЧИВАЕМ что data есть
+#         if 'data' not in parsed:
+#             parsed['data'] = {}
+        
+#         # Добавляем обязательные поля если их нет
+#         if 'invoice_full_text' not in parsed['data']:
+#             invoice_number = parsed['data'].get('invoice_number')
+#             invoice_date = parsed['data'].get('invoice_date')
+#             if invoice_number and invoice_date:
+#                 parsed['data']['invoice_full_text'] = f"Счет на оплату № {invoice_number} от {invoice_date}"
+#             elif invoice_number:
+#                 parsed['data']['invoice_full_text'] = f"Счет на оплату № {invoice_number}"
+#             elif invoice_date:
+#                 parsed['data']['invoice_full_text'] = f"Счет от {invoice_date}"
+        
+#         # Сохраняем в буфер
+#         add_invoice(parsed)
+        
+#         # 5. Фиксируем только строки товаров, НЕ изменяем реестр
+#         db.commit()
+#         log.info("[OCR] Processing complete for %s", file_path.name)
+#         print(f"[DEBUG] Invoice saved to buffer: {invoice_id}")
+#         print(f"[DEBUG] NO automatic application to registry!")
+        
+#     except Exception as e:
+#         db.rollback()
+#         log.exception("[OCR] Failed to process invoice %s: %s", file_path.name, str(e))
+#         print(f"\n=== DEBUG: EXCEPTION ===")
+#         print(f"Error processing invoice: {str(e)}")
+#         import traceback
+#         traceback.print_exc()
+#     finally:
+#         db.close()
+#         print(f"[DEBUG] Database connection closed")
+
 def process_invoice_pdf_background(file_path: Path, batch_id: str):
     db = SessionLocal()
     try:
-        # 1. Парсим PDF
+        # 1. Парсим PDF (теперь только таблицы + метаданные из universal_parser)
         parsed = parse_invoice_from_pdf(file_path)
+        
         if not parsed:
             log.error("[OCR] Failed to parse PDF: %s", file_path.name)
             return
         
-        print(f"\n=== DEBUG: parse_invoice_from_pdf result ===")
+        print(f"\n=== DEBUG: Parser result ===")
         print(f"Contractor: {parsed.get('data', {}).get('contractor')}")
         print(f"Invoice number: {parsed.get('data', {}).get('invoice_number')}")
-        print(f"Invoice date: {parsed.get('data', {}).get('invoice_date')}")
+        print(f"Lines found: {len(parsed.get('lines', []))}")
         
-        # 2. Добавляем ID и информацию о batch
+        # 2. ГАРАНТИРУЕМ наличие необходимых полей
         invoice_id = str(uuid.uuid4())
         parsed["id"] = invoice_id
         parsed["batch_id"] = batch_id
-        parsed["file"] = file_path.name
+        parsed["file"] = str(file_path.name)
         
-        # 3. ВСЕГДА сохраняем строки счета в базу
+        # 3. Сохраняем строки товаров (если есть)
         if parsed.get("lines"):
             log.info("[OCR] Saving %d invoice lines to database", len(parsed["lines"]))
             save_invoice_lines(
@@ -121,47 +204,58 @@ def process_invoice_pdf_background(file_path: Path, batch_id: str):
                 batch_id=batch_id,
                 lines=parsed.get("lines", []),
             )
-        else:
-            log.warning("[OCR] No product lines found in invoice")
         
-        # 4. ВСЕГДА сохраняем счет в буфер (для предпросмотра)
+        # 4. ВСЕГДА сохраняем счет в буфер (даже если нет товаров)
         print(f"\n=== DEBUG: Adding to buffer ===")
         print(f"Invoice ID: {invoice_id}")
+        print(f"Batch ID: {batch_id}")
         
-        # ОБЕСПЕЧИВАЕМ что data есть
-        if 'data' not in parsed:
-            parsed['data'] = {}
-        
-        # Добавляем обязательные поля если их нет
-        if 'invoice_full_text' not in parsed['data']:
-            invoice_number = parsed['data'].get('invoice_number')
-            invoice_date = parsed['data'].get('invoice_date')
+        # Гарантируем наличие invoice_full_text для фронтенда
+        data = parsed.get('data', {})
+        if 'invoice_full_text' not in data or not data['invoice_full_text']:
+            invoice_number = data.get('invoice_number')
+            invoice_date = data.get('invoice_date')
+            contractor = data.get('contractor')
+            
             if invoice_number and invoice_date:
-                parsed['data']['invoice_full_text'] = f"Счет на оплату № {invoice_number} от {invoice_date}"
+                data['invoice_full_text'] = f"Счет на оплату № {invoice_number} от {invoice_date}"
             elif invoice_number:
-                parsed['data']['invoice_full_text'] = f"Счет на оплату № {invoice_number}"
-            elif invoice_date:
-                parsed['data']['invoice_full_text'] = f"Счет от {invoice_date}"
+                data['invoice_full_text'] = f"Счет на оплату № {invoice_number}"
+            elif contractor:
+                data['invoice_full_text'] = f"Счет от {contractor}"
+            else:
+                data['invoice_full_text'] = f"Счет: {file_path.name}"
         
         # Сохраняем в буфер
         add_invoice(parsed)
         
-        # 5. Фиксируем только строки товаров, НЕ изменяем реестр
         db.commit()
         log.info("[OCR] Processing complete for %s", file_path.name)
         print(f"[DEBUG] Invoice saved to buffer: {invoice_id}")
-        print(f"[DEBUG] NO automatic application to registry!")
         
     except Exception as e:
         db.rollback()
         log.exception("[OCR] Failed to process invoice %s: %s", file_path.name, str(e))
-        print(f"\n=== DEBUG: EXCEPTION ===")
-        print(f"Error processing invoice: {str(e)}")
-        import traceback
-        traceback.print_exc()
+        
+        # Даже при ошибке создаем минимальный счет для буфера
+        try:
+            minimal_invoice = {
+                "id": str(uuid.uuid4()),
+                "batch_id": batch_id,
+                "file": str(file_path.name),
+                "data": {
+                    "error": str(e),
+                    "invoice_full_text": f"Ошибка парсинга: {file_path.name}",
+                },
+                "lines": [],
+                "confidence": 0.1,
+            }
+            add_invoice(minimal_invoice)
+            print(f"[DEBUG] Minimal invoice added despite error")
+        except:
+            pass
     finally:
         db.close()
-        print(f"[DEBUG] Database connection closed")
 
 # -------------------------------------------------------------------
 # APPLY INVOICE LINE 
@@ -539,6 +633,125 @@ def get_invoice_lines_endpoint(
         for l in lines
     ]
 
+@app.get("/invoice/{invoice_id}/lines")
+def get_invoice_lines_endpoint(
+    invoice_id: str,
+    db: Session = Depends(get_db),
+):
+    print(f"\n=== DEBUG /invoice/{invoice_id}/lines ===")
+    
+    # 1. Проверяем что строка счета существует в буфере
+    from backend.services.invoice_buffer import get_invoice, list_invoices  # Импорт буфера
+    
+    invoice_in_buffer = get_invoice(invoice_id)
+    print(f"Invoice in buffer: {invoice_in_buffer is not None}")
+    if invoice_in_buffer:
+        print(f"Buffer lines count: {len(invoice_in_buffer.get('lines', []))}")
+    
+    # 2. Проверяем строки в базе данных
+    db_lines = (
+        db.query(InvoiceLine)
+        .filter(InvoiceLine.invoice_id == invoice_id)
+        .order_by(InvoiceLine.line_no)
+        .all()
+    )
+    
+    print(f"Lines in database: {len(db_lines)}")
+    for line in db_lines:
+        print(f"  Line {line.line_no}: '{line.description[:30]}...' qty={line.quantity}, price={line.price}, total={line.total}")
+    
+    # 3. Если в базе нет строк, проверяем буфер
+    result = []
+    
+    if db_lines:
+        # Берем строки из базы
+        for l in db_lines:
+            try:
+                line_data = {
+                    "line_no": l.line_no,
+                    "description": l.description,
+                    "quantity": l.quantity,
+                    "price": float(l.price) if l.price else None,
+                    "total": float(l.total) if l.total else None,
+                    "used": l.used,
+                }
+                result.append(line_data)
+            except Exception as e:
+                print(f"  Error formatting line {l.line_no}: {e}")
+    elif invoice_in_buffer and 'lines' in invoice_in_buffer:
+        # Берем строки из буфера
+        buffer_lines = invoice_in_buffer.get('lines', [])
+        print(f"Using {len(buffer_lines)} lines from buffer")
+        
+        for i, line in enumerate(buffer_lines):
+            try:
+                line_data = {
+                    "line_no": line.get('line_no', i + 1),
+                    "description": line.get('description', ''),
+                    "quantity": int(line.get('qty', 1)),
+                    "price": float(line.get('price', 0)) if line.get('price') else 0,
+                    "total": float(line.get('total', 0)) if line.get('total') else 0,
+                    "used": line.get('used', False),
+                }
+                result.append(line_data)
+            except Exception as e:
+                print(f"  Error formatting buffer line {i}: {e}")
+    
+    print(f"Returning {len(result)} lines to frontend")
+    
+    if not result:
+        print("WARNING: No lines found for this invoice!")
+        print(f"Invoice ID: {invoice_id}")
+        print(f"Check if invoice was parsed correctly and lines were saved.")
+    
+    return result
+
+# @app.get("/invoice/{invoice_id}/lines")
+# def get_invoice_lines_endpoint(
+#     invoice_id: str,
+#     db: Session = Depends(get_db),
+# ):
+#     print(f"\n=== DEBUG /invoice/{invoice_id}/lines ===")
+    
+#     # 1. Проверяем что строка счета существует в буфере
+#     invoice_in_buffer = get_invoice(invoice_id)
+#     print(f"Invoice in buffer: {invoice_in_buffer is not None}")
+#     if invoice_in_buffer:
+#         print(f"Buffer lines count: {len(invoice_in_buffer.get('lines', []))}")
+    
+#     # 2. Проверяем строки в базе данных
+#     lines = (
+#         db.query(InvoiceLine)
+#         .filter(InvoiceLine.invoice_id == invoice_id)
+#         .order_by(InvoiceLine.line_no)
+#         .all()
+#     )
+    
+#     print(f"Lines in database: {len(lines)}")
+#     for line in lines:
+#         print(f"  Line {line.line_no}: '{line.description[:30]}...' qty={line.quantity}, price={line.price}, total={line.total}")
+    
+#     # 3. Форматируем результат
+#     result = []
+#     for l in lines:
+#         try:
+#             line_data = {
+#                 "line_no": l.line_no,
+#                 "description": l.description,
+#                 "quantity": l.quantity,
+#                 "price": float(l.price) if l.price else None,
+#                 "total": float(l.total) if l.total else None,
+#                 "used": l.used,
+#             }
+#             result.append(line_data)
+#         except Exception as e:
+#             print(f"  Error formatting line {l.line_no}: {e}")
+    
+#     print(f"Returning {len(result)} lines to frontend")
+    
+#     return result
+
+
 # -------------------------------------------------------------------
 # INVOICES FROM BUFFER
 # -------------------------------------------------------------------
@@ -817,3 +1030,280 @@ def get_registry_order(batch_id: str, db: Session = Depends(get_db)):
 @app.get("/")
 def root():
     return {"message": "Registry Control API"}
+
+#-----------отладочный эндпоинт
+
+@app.get("/debug/invoice/{invoice_id}")
+def debug_invoice_info(invoice_id: str, db: Session = Depends(get_db)):
+    """Отладочная информация о счете"""
+    
+    # Проверяем буфер
+    from backend.services.invoice_buffer import get_invoice, list_invoices
+    
+    invoice_in_buffer = get_invoice(invoice_id)
+    
+    # Проверяем базу
+    db_lines = db.query(InvoiceLine).filter(InvoiceLine.invoice_id == invoice_id).all()
+    
+    return {
+        "invoice_id": invoice_id,
+        "in_buffer": invoice_in_buffer is not None,
+        "buffer_data": {
+            "has_data": invoice_in_buffer is not None,
+            "has_lines": invoice_in_buffer and 'lines' in invoice_in_buffer,
+            "lines_count": len(invoice_in_buffer.get('lines', [])) if invoice_in_buffer else 0,
+            "contractor": invoice_in_buffer.get('data', {}).get('contractor') if invoice_in_buffer else None,
+            "metadata_keys": list(invoice_in_buffer.get('data', {}).keys()) if invoice_in_buffer else []
+        },
+        "in_database": {
+            "lines_count": len(db_lines),
+            "lines": [
+                {
+                    "line_no": l.line_no,
+                    "description": l.description[:50],
+                    "quantity": l.quantity,
+                    "price": l.price,
+                    "total": l.total
+                }
+                for l in db_lines[:5]  # Первые 5 строк
+            ]
+        }
+    }
+
+
+@app.get("/debug/check-invoice/{invoice_id}")
+def debug_check_invoice(invoice_id: str, db: Session = Depends(get_db)):
+    """Отладочная информация о счете"""
+    from backend.services.invoice_buffer import get_invoice
+    
+    # 1. Проверяем буфер
+    invoice_in_buffer = get_invoice(invoice_id)
+    
+    # 2. Проверяем базу
+    db_lines = db.query(InvoiceLine).filter(InvoiceLine.invoice_id == invoice_id).all()
+    
+    # 3. Форматируем информацию
+    buffer_info = {}
+    if invoice_in_buffer:
+        buffer_info = {
+            "id": invoice_in_buffer.get("id"),
+            "batch_id": invoice_in_buffer.get("batch_id"),
+            "has_lines": "lines" in invoice_in_buffer,
+            "lines_count": len(invoice_in_buffer.get("lines", [])),
+            "lines_sample": invoice_in_buffer.get("lines", [])[:2] if invoice_in_buffer.get("lines") else [],
+            "metadata": invoice_in_buffer.get("data", {})
+        }
+    
+    return {
+        "invoice_id": invoice_id,
+        "in_buffer": buffer_info,
+        "in_database": {
+            "lines_count": len(db_lines),
+            "lines": [
+                {
+                    "line_no": l.line_no,
+                    "description": l.description[:50] if l.description else "",
+                    "quantity": l.quantity,
+                    "price": l.price,
+                    "total": l.total
+                }
+                for l in db_lines[:5]
+            ]
+        },
+        "api_endpoints": {
+            "lines": f"/invoice/{invoice_id}/lines",
+            "buffer": f"/debug/invoice/{invoice_id}"
+        }
+    }
+
+
+@app.post("/invoice/apply-multiple-lines")
+def apply_multiple_invoice_lines(payload: ApplyMultipleLinesRequest, db: Session = Depends(get_db)):
+    """Применить несколько выбранных строк счета к строке реестра"""
+    log.info(
+        "[APPLY_MULTIPLE] invoice_id=%s lines=%s registry_id=%s",
+        payload.invoice_id,
+        payload.line_nos,
+        payload.registry_id,
+    )
+
+    registry = db.query(PaymentRegistry).get(payload.registry_id)
+    if not registry:
+        log.warning("[APPLY_MULTIPLE] registry not found")
+        raise HTTPException(404, "Registry item not found")
+
+    # Проверяем что запись принадлежит указанному batch
+    if registry.imported_batch != payload.batch_id:
+        raise HTTPException(400, "Registry item does not belong to this batch")
+
+    # Получаем данные счета из буфера
+    invoice = get_invoice(payload.invoice_id)
+    if not invoice:
+        log.error("[APPLY_MULTIPLE] invoice not found in buffer")
+        raise HTTPException(404, "Invoice not found")
+
+    # Суммируем суммы выбранных строк
+    total_amount = 0
+    applied_lines = []
+    
+    for line_no in payload.line_nos:
+        # Ищем строку в базе данных
+        line = (
+            db.query(InvoiceLine)
+            .filter(
+                InvoiceLine.invoice_id == payload.invoice_id,
+                InvoiceLine.line_no == line_no,
+                InvoiceLine.used.is_(False),
+            )
+            .first()
+        )
+        
+        if line:
+            try:
+                line_total = float(line.total) if line.total else 0
+                total_amount += line_total
+                applied_lines.append(line_no)
+                
+                # Помечаем строку как использованную
+                mark_invoice_line_used(db, payload.invoice_id, line_no)
+            except (ValueError, TypeError):
+                log.warning(f"Invalid total for line {line_no}: {line.total}")
+        else:
+            log.warning(f"Line {line_no} not found or already used")
+
+    log.info(f"[APPLY_MULTIPLE] Total amount: {total_amount} from {len(applied_lines)} lines")
+
+    invoice_data = {
+        "id": payload.invoice_id,
+        "data": dict(invoice["data"]),
+        "lines": invoice.get("lines", []),
+        "confidence": invoice.get("confidence", 0)
+    }
+
+    # Создаем модифицированные данные с суммой выбранных строк
+    modified_data = invoice_data.copy()
+    if "data" in modified_data:
+        # Добавляем общую сумму выбранных строк
+        modified_data["data"]["total"] = str(total_amount)
+    
+    # Применяем счет к строке реестра
+    apply_invoice_ocr_to_registry(
+        db, 
+        registry.id, 
+        modified_data,
+        apply_full_metadata=True,
+        line_no=None  # Не используем конкретную строку, так как сумма уже вычислена
+    )
+
+    # Обновляем сумму в реестре суммой выбранных строк
+    registry.amount = total_amount
+
+    db.commit()
+
+    log.info(
+        "[APPLY_MULTIPLE] APPLIED OK registry_id=%s total_amount=%s lines_applied=%s",
+        registry.id,
+        total_amount,
+        len(applied_lines),
+    )
+
+    return {
+        "status": "ok",
+        "message": f"Applied {len(applied_lines)} lines",
+        "total_amount": total_amount,
+        "lines_applied": applied_lines,
+        "registry_id": registry.id
+    }
+
+@app.post("/invoice/apply-all-lines")
+def apply_all_invoice_lines(payload: ApplyAllLinesRequest, db: Session = Depends(get_db)):
+    """Применить все строки счета к строке реестра"""
+    log.info(
+        "[APPLY_ALL] invoice_id=%s registry_id=%s",
+        payload.invoice_id,
+        payload.registry_id,
+    )
+
+    registry = db.query(PaymentRegistry).get(payload.registry_id)
+    if not registry:
+        log.warning("[APPLY_ALL] registry not found")
+        raise HTTPException(404, "Registry item not found")
+
+    # Проверяем что запись принадлежит указанному batch
+    if registry.imported_batch != payload.batch_id:
+        raise HTTPException(400, "Registry item does not belong to this batch")
+
+    # Получаем данные счета из буфера
+    invoice = get_invoice(payload.invoice_id)
+    if not invoice:
+        log.error("[APPLY_ALL] invoice not found in buffer")
+        raise HTTPException(404, "Invoice not found")
+
+    # Получаем все строки счета
+    lines = (
+        db.query(InvoiceLine)
+        .filter(
+            InvoiceLine.invoice_id == payload.invoice_id,
+            InvoiceLine.used.is_(False),
+        )
+        .all()
+    )
+
+    # Суммируем все суммы строк
+    total_amount = 0
+    applied_lines = []
+    
+    for line in lines:
+        try:
+            line_total = float(line.total) if line.total else 0
+            total_amount += line_total
+            applied_lines.append(line.line_no)
+            
+            # Помечаем строку как использованную
+            mark_invoice_line_used(db, payload.invoice_id, line.line_no)
+        except (ValueError, TypeError):
+            log.warning(f"Invalid total for line {line.line_no}: {line.total}")
+
+    log.info(f"[APPLY_ALL] Total amount: {total_amount} from {len(applied_lines)} lines")
+
+    invoice_data = {
+        "id": payload.invoice_id,
+        "data": dict(invoice["data"]),
+        "lines": invoice.get("lines", []),
+        "confidence": invoice.get("confidence", 0)
+    }
+
+    # Создаем модифицированные данные с общей суммой
+    modified_data = invoice_data.copy()
+    if "data" in modified_data:
+        # Добавляем общую сумму всех строк
+        modified_data["data"]["total"] = str(total_amount)
+    
+    # Применяем счет к строке реестра
+    apply_invoice_ocr_to_registry(
+        db, 
+        registry.id, 
+        modified_data,
+        apply_full_metadata=True,
+        line_no=None  # Используем общую сумму
+    )
+
+    # Обновляем сумму в реестре общей суммой всех строк
+    registry.amount = total_amount
+
+    db.commit()
+
+    log.info(
+        "[APPLY_ALL] APPLIED OK registry_id=%s total_amount=%s lines_applied=%s",
+        registry.id,
+        total_amount,
+        len(applied_lines),
+    )
+
+    return {
+        "status": "ok",
+        "message": f"Applied all {len(applied_lines)} lines",
+        "total_amount": total_amount,
+        "lines_applied": applied_lines,
+        "registry_id": registry.id
+    }
