@@ -4,7 +4,7 @@
 
 from .excel_parser import ExcelParser
 from .universal_parser import extract_metadata_universal  # ТОЛЬКО метаданные
-from .invoice_parser import parse_invoice_from_pdf         # Главный парсер
+from parsers.invoice_parser import parse_invoice_from_pdf         # Главный парсер
 # from .legacy_invoice_parser import parse_invoice_legacy  # УБРАТЬ ЭТУ СТРОКУ!
 from .legacy_invoice_parser import parse_invoice_lines_only  # ИСПРАВЛЕННАЯ СТРОКА
 

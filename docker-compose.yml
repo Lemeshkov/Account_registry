@@ -1,0 +1,178 @@
+# services:
+#   postgres:
+#     image: postgres:15-alpine
+#     container_name: registry_postgres
+#     environment:
+#       POSTGRES_DB: account_registry
+#       POSTGRES_USER: admin
+#       POSTGRES_PASSWORD: admin123
+#     ports:
+#       - "5432:5432"
+#     volumes:
+#       - postgres_data:/var/lib/postgresql/data
+
+#   redis:
+#     image: redis:7-alpine
+#     container_name: registry_redis
+#     ports:
+#       - "6379:6379"
+#     command: redis-server --appendonly no
+
+#   backend:
+#     build: ./backend
+#     container_name: registry_backend
+#     ports:
+#       - "8000:8000"
+#     environment:
+#       DATABASE_URL: postgresql://admin:admin123@postgres:5432/account_registry
+#       REDIS_URL: redis://redis:6379/0
+#       PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK: "True"
+#     depends_on:
+#       - postgres
+#       - redis
+#     # volumes:    - КОММЕНТАРИЙ: раскомментируйте ТОЛЬКО для разработки при отладке
+#     #   - ./backend:/app
+
+# volumes:
+#   postgres_data:
+
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: registry_postgres
+    environment:
+      POSTGRES_DB: account_registry
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: admin123
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U admin -d account_registry"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - registry_network
+
+  redis:
+    image: redis:7-alpine
+    container_name: registry_redis
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly no
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - registry_network
+
+  backend:
+    build: 
+      context: ./backend
+      dockerfile: Dockerfile
+      target: ${BUILD_TARGET:-development}  # development или production
+    container_name: registry_backend
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql://admin:admin123@postgres:5432/account_registry
+      REDIS_URL: redis://redis:6379/0
+      PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK: "True"
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+    env_file:
+      - .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app  # Монтируем код для hot-reload
+      - /app/__pycache__  # Исключаем кэш Python
+      - uploads_data:/app/uploads
+    command: >
+      sh -c "
+        if [ \"$ENVIRONMENT\" = \"production\" ]; then
+          uvicorn main:app --host 0.0.0.0 --port 8000;
+        else
+          uvicorn main:app --host 0.0.0.0 --port 8000 --reload;
+        fi
+      "
+    networks:
+      - registry_network
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      target: ${BUILD_TARGET:-development}
+    container_name: registry_frontend
+    ports:
+      - "3000:3000"
+    environment:
+      VITE_API_URL: http://localhost:8000
+      VITE_WS_URL: ws://localhost:8000
+      NODE_ENV: ${ENVIRONMENT:-development}
+    depends_on:
+      - backend
+    volumes:
+      - ./frontend:/app  # Монтируем код для hot-reload
+      - /app/node_modules  # Не монтируем node_modules из хоста
+    command: >
+      sh -c "
+        if [ \"$ENVIRONMENT\" = \"production\" ]; then
+          npm run build && npm run preview;
+        else
+          npm run dev -- --host 0.0.0.0;
+        fi
+      "
+    networks:
+      - registry_network
+
+  # Опционально: админка для PostgreSQL
+  pgadmin:
+    image: dpage/pgadmin4
+    container_name: registry_pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@admin.com
+      PGADMIN_DEFAULT_PASSWORD: admin
+    ports:
+      - "5050:80"
+    depends_on:
+      - postgres
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    networks:
+      - registry_network
+    profiles:
+      - tools
+
+  # Опционально: админка для Redis
+  redis-commander:
+    image: rediscommander/redis-commander:latest
+    container_name: registry_redis_commander
+    environment:
+      REDIS_HOSTS: local:redis:6379
+    ports:
+      - "8081:8081"
+    depends_on:
+      - redis
+    networks:
+      - registry_network
+    profiles:
+      - tools
+
+volumes:
+  postgres_data:
+  uploads_data:
+  pgadmin_data:
+
+networks:
+  registry_network:
+    driver: bridge

@@ -1578,11 +1578,11 @@
 
 import os
 from typing import Dict, Any, List
-from backend.services.ocr_service_fast import ocr_pdf_fast as ocr_pdf
-from .legacy_invoice_parser import parse_invoice_lines_legacy
-from .universal_parser import extract_metadata_universal
-from .legacy_invoice_parser import parse_invoice_lines_only
-from .legacy_invoice_parser import parse_this_specific_invoice
+from services.ocr_service_fast import ocr_pdf_fast as ocr_pdf
+from parsers.legacy_invoice_parser import parse_invoice_lines_legacy
+from parsers.universal_parser import extract_metadata_universal
+from parsers.legacy_invoice_parser import parse_invoice_lines_only
+from parsers.legacy_invoice_parser import parse_this_specific_invoice
 
 def parse_invoice_from_pdf(pdf_path: str, excel_record: Dict[str, Any] = None) -> Dict[str, Any]:
     """

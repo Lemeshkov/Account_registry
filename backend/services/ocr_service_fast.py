@@ -3,12 +3,17 @@
 Ускоряет обработку с 3 минут до 10-30 секунд
 """
 
-from pdf2image import convert_from_path
-import numpy as np
+import os
 import time
-from typing import List
-import threading
 import logging
+from typing import List, Dict, Any
+import numpy as np
+from pdf2image import convert_from_path
+
+# Отключаем проверки PaddleOCR
+os.environ['PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK'] = 'True'
+os.environ['PADDLEOCR_SKIP_LOG'] = '1'
+os.environ['CUDA_VISIBLE_DEVICES'] = '-1'  # Принудительно CPU
 
 log = logging.getLogger(__name__)
 
@@ -17,7 +22,7 @@ log = logging.getLogger(__name__)
 # -------------------------------------------------------------------
 
 OCR_CONFIG = {
-    "dpi": 300,           # БЫЛО 300, СТАЛО 150 - в 4 раза быстрее!
+    "dpi": 150,           # 150 вместо 300 - в 4 раза быстрее!
     "grayscale": True,    # Черно-белое - в 2 раза быстрее цветного
     "max_workers": 2,     # Параллельная обработка страниц
     "timeout_per_page": 30,  # Таймаут на страницу
@@ -28,28 +33,128 @@ OCR_CONFIG = {
 # -------------------------------------------------------------------
 
 # EasyOCR (рекомендую - проще установить, хорошая точность)
+OCR_ENGINE = None
+_OCR_READER = None
+
 try:
     import easyocr
     _OCR_READER = easyocr.Reader(['ru', 'en'], gpu=False)
     OCR_ENGINE = "easyocr"
     log.info("[OCR] Using EasyOCR engine (fast!)")
 except ImportError:
-    _OCR_READER = None
-    log.warning("[OCR] EasyOCR not installed")
+    log.warning("[OCR] EasyOCR not installed, trying PaddleOCR...")
 
-# PaddleOCR (ваш текущий, самый медленный - резервный вариант)
+# PaddleOCR (резервный вариант)
 if _OCR_READER is None:
     try:
         from paddleocr import PaddleOCR
-        _OCR_READER = PaddleOCR(lang="ru", use_angle_cls=False, show_log=False, use_gpu=False)
+        
+        # Только поддерживаемые параметры для PaddleOCR 2.8+
+        _OCR_READER = PaddleOCR(
+            lang='ru',
+            use_angle_cls=False
+            # НЕ ИСПОЛЬЗОВАТЬ: show_log, use_gpu - удалены в новой версии!
+        )
         OCR_ENGINE = "paddleocr"
-        log.warning("[OCR] Using SLOW PaddleOCR - install EasyOCR for speed!")
+        log.warning("[OCR] Using PaddleOCR engine (slower than EasyOCR)")
     except ImportError:
+        log.error("[OCR] No OCR engine available! Install easyocr or paddleocr")
+        OCR_ENGINE = None
         _OCR_READER = None
-        log.error("[OCR] No OCR engine available!")
+    except Exception as e:
+        log.error(f"[OCR] Failed to initialize PaddleOCR: {e}")
+        OCR_ENGINE = None
+        _OCR_READER = None
 
 # -------------------------------------------------------------------
-# ОПТИМИЗИРОВАННЫЕ ФУНКЦИИ
+# ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
+# -------------------------------------------------------------------
+
+def _enhance_contrast(img_np: np.ndarray) -> np.ndarray:
+    """Улучшение контраста изображения для лучшего OCR"""
+    if len(img_np.shape) == 3:
+        # Конвертируем в grayscale если еще не
+        img_np = np.mean(img_np, axis=2).astype(np.uint8)
+    
+    # Автоматическое выравнивание гистограммы
+    min_val = np.percentile(img_np, 2)   # 2-й процентиль как черный
+    max_val = np.percentile(img_np, 98)  # 98-й процентиль как белый
+    
+    if max_val > min_val:
+        # Масштабируем контраст
+        img_np = np.clip((img_np - min_val) * 255.0 / (max_val - min_val), 0, 255)
+    
+    return img_np.astype(np.uint8)
+
+def _process_single_page_easyocr(image_np: np.ndarray) -> str:
+    """Обработка одной страницы EasyOCR"""
+    try:
+        # EasyOCR - цветное изображение
+        if len(image_np.shape) == 2:
+            # Grayscale to BGR
+            image_bgr = np.stack([image_np, image_np, image_np], axis=2)
+        else:
+            image_bgr = image_np
+        
+        result = _OCR_READER.readtext(image_bgr, paragraph=True)
+        text = " ".join([detection[1] for detection in result])
+        return text.strip()
+    except Exception as e:
+        log.error(f"[OCR PAGE ERROR] EasyOCR: {e}")
+        return ""
+
+def _process_single_page_paddleocr(image_np: np.ndarray) -> str:
+    """Обработка одной страницы PaddleOCR"""
+    try:
+        # PaddleOCR работает с numpy array
+        result = _OCR_READER.ocr(image_np, cls=False)
+        text = ""
+        if result and result[0]:
+            text = " ".join([line[1][0] for line in result[0]])
+        return text.strip()
+    except Exception as e:
+        log.error(f"[OCR PAGE ERROR] PaddleOCR: {e}")
+        return ""
+
+def _process_single_page(image_np: np.ndarray) -> str:
+    """Обработка одной страницы (выбор движка)"""
+    if OCR_ENGINE == "easyocr":
+        return _process_single_page_easyocr(image_np)
+    elif OCR_ENGINE == "paddleocr":
+        return _process_single_page_paddleocr(image_np)
+    else:
+        return ""
+
+def _process_pages_parallel(images: List[np.ndarray]) -> List[str]:
+    """Параллельная обработка нескольких страниц"""
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    
+    pages_text = [""] * len(images)
+    
+    # Ограничиваем количество параллельных задач
+    max_workers = min(OCR_CONFIG["max_workers"], len(images))
+    
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        # Запускаем задачи
+        future_to_idx = {
+            executor.submit(_process_single_page, img): idx
+            for idx, img in enumerate(images)
+        }
+        
+        # Собираем результаты
+        for future in as_completed(future_to_idx):
+            idx = future_to_idx[future]
+            try:
+                text = future.result(timeout=OCR_CONFIG["timeout_per_page"])
+                pages_text[idx] = text
+            except Exception as e:
+                log.error(f"[OCR PAGE {idx} ERROR] {e}")
+                pages_text[idx] = ""
+    
+    return pages_text
+
+# -------------------------------------------------------------------
+# ОСНОВНЫЕ ФУНКЦИИ
 # -------------------------------------------------------------------
 
 def ocr_pdf_fast(pdf_path: str) -> List[str]:
@@ -81,21 +186,20 @@ def ocr_pdf_fast(pdf_path: str) -> List[str]:
         if not images:
             return []
         
-        # 2. ПРЕДОБРАБОТКА ИЗОБРАЖЕНИЙ (улучшает качество OCR)
+        # 2. ПРЕДОБРАБОТКА ИЗОБРАЖЕНИЙ
         processed_images = []
         for img in images:
             img_np = np.array(img)
             
             # Если цветное - конвертируем в grayscale
             if len(img_np.shape) == 3:
-                # Быстрое усреднение каналов
                 img_np = np.mean(img_np, axis=2).astype(np.uint8)
             
             # Автоматическое выравнивание контраста
             img_np = _enhance_contrast(img_np)
             processed_images.append(img_np)
         
-        # 3. ОБРАБОТКА OCR (параллельно для многостраничных)
+        # 3. ОБРАБОТКА OCR
         ocr_start = time.time()
         
         if len(processed_images) == 1:
@@ -121,80 +225,17 @@ def ocr_pdf_fast(pdf_path: str) -> List[str]:
         log.exception(f"[OCR ERROR] {pdf_path}: {e}")
         return []
 
-def _enhance_contrast(img_np: np.ndarray) -> np.ndarray:
-    """Улучшение контраста изображения для лучшего OCR"""
-    if len(img_np.shape) == 3:
-        # Конвертируем в grayscale если еще не
-        img_np = np.mean(img_np, axis=2).astype(np.uint8)
-    
-    # Автоматическое выравнивание гистограммы
-    min_val = np.percentile(img_np, 2)   # 2-й процентиль как черный
-    max_val = np.percentile(img_np, 98)  # 98-й процентиль как белый
-    
-    if max_val > min_val:
-        # Масштабируем контраст
-        img_np = np.clip((img_np - min_val) * 255.0 / (max_val - min_val), 0, 255)
-    
-    return img_np.astype(np.uint8)
-
-def _process_single_page(image_np: np.ndarray) -> str:
-    """Обработка одной страницы"""
-    try:
-        if OCR_ENGINE == "easyocr":
-            # EasyOCR - цветное изображение
-            if len(image_np.shape) == 2:
-                # Grayscale to BGR
-                image_bgr = np.stack([image_np, image_np, image_np], axis=2)
-            else:
-                image_bgr = image_np
-            
-            result = _OCR_READER.readtext(image_bgr, paragraph=True)
-            text = " ".join([detection[1] for detection in result])
-            
-        else:  # paddleocr
-            result = _OCR_READER.ocr(image_np, cls=False)
-            if result and result[0]:
-                text = " ".join([line[1][0] for line in result[0]])
-            else:
-                text = ""
-        
-        return text.strip()
-        
-    except Exception as e:
-        log.error(f"[OCR PAGE ERROR] {e}")
-        return ""
-
-def _process_pages_parallel(images: List[np.ndarray]) -> List[str]:
-    """Параллельная обработка нескольких страниц"""
-    from concurrent.futures import ThreadPoolExecutor, as_completed
-    
-    pages_text = [""] * len(images)
-    
-    # Ограничиваем количество параллельных задач
-    max_workers = min(OCR_CONFIG["max_workers"], len(images))
-    
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        # Запускаем задачи
-        future_to_idx = {
-            executor.submit(_process_single_page, img): idx
-            for idx, img in enumerate(images)
-        }
-        
-        # Собираем результаты
-        for future in as_completed(future_to_idx):
-            idx = future_to_idx[future]
-            try:
-                text = future.result(timeout=OCR_CONFIG["timeout_per_page"])
-                pages_text[idx] = text
-            except Exception as e:
-                log.error(f"[OCR PAGE {idx} ERROR] {e}")
-                pages_text[idx] = ""
-    
-    return pages_text
-
-def ocr_pdf(pdf_path: str) -> list[str]:
+def ocr_pdf(pdf_path: str) -> List[str]:
     """Алиас для обратной совместимости"""
     return ocr_pdf_fast(pdf_path)
+
+def get_ocr_info() -> Dict[str, Any]:
+    """Информация о текущем OCR движке"""
+    return {
+        "engine": OCR_ENGINE,
+        "config": OCR_CONFIG,
+        "available": _OCR_READER is not None
+    }
 
 # -------------------------------------------------------------------
 # ТЕСТИРОВАНИЕ

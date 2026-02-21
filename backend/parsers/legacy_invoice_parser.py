@@ -8,7 +8,7 @@
 
 import re
 from typing import Optional, Tuple, List, Dict, Any
-from backend.services.ocr_service_fast import ocr_pdf_fast as ocr_pdf
+from services.ocr_service_fast import ocr_pdf_fast as ocr_pdf
 
 
 def fix_ocr_errors(text: str) -> str:

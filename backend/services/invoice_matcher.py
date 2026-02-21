@@ -1,5 +1,5 @@
 from sqlalchemy.orm import Session
-from backend.models import PaymentRegistry
+from models import PaymentRegistry
 from sqlalchemy import func
 
 def try_match_invoice(

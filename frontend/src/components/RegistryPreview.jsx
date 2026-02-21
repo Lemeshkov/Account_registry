@@ -8,20 +8,20 @@
 
 // const RegistryPreview = ({ data, onReload }) => {
 //   const [rows, setRows] = useState([]);
-//   const [originalRows, setOriginalRows] = useState([]); // Сохраняем оригинальный порядок
+//   const [originalRows, setOriginalRows] = useState([]);
 //   const [matchInvoice, setMatchInvoice] = useState(null);
 //   const [availableInvoices, setAvailableInvoices] = useState([]);
 //   const [isLoading, setIsLoading] = useState(false);
+//   const [exportLoading, setExportLoading] = useState(false); // Новое состояние для экспорта
 //   const [debugInfo, setDebugInfo] = useState("");
 //   const [batchId, setBatchId] = useState("");
 //   const [selectedRowIndex, setSelectedRowIndex] = useState(null);
-//   const [lastUpdatedRowId, setLastUpdatedRowId] = useState(null); // Для подсветки обновленной строки
+//   const [lastUpdatedRowId, setLastUpdatedRowId] = useState(null);
 
 //   // Инициализация строк - сохраняем оригинальный порядок
 //   useEffect(() => {
 //     console.log("📊 Data received in RegistryPreview:", data);
     
-//     // Определяем формат данных
 //     let registryData = [];
 //     let extractedBatchId = "";
     
@@ -46,24 +46,21 @@
 //       console.log(`✅ Using ${registryData.length} registry items`);
 //       setDebugInfo(`Получено ${registryData.length} строк реестра`);
       
-//       // Добавляем поле для сохранения порядка
 //       const rowsWithOrder = registryData.map((r, index) => ({
 //         ...r,
 //         payer: r.payer || "Сибуглеснаб",
 //         payment_system: r.payment_system || "Предоплата",
 //         included_in_plan: true,
-//         displayOrder: r.position || index, // Используем position из бэкенда
+//         displayOrder: r.position || index,
 //         hasInvoice: !!r.invoice_id,
-//         originalId: r.id // Сохраняем оригинальный ID
+//         originalId: r.id
 //       }));
       
-//       // Сортируем по position (если бэкенд уже отсортировал, это для надежности)
 //       rowsWithOrder.sort((a, b) => (a.displayOrder || 0) - (b.displayOrder || 0));
 
 //       setOriginalRows(rowsWithOrder);
 //       setRows(rowsWithOrder);
       
-//       // Извлекаем batch_id из данных
 //       if (rowsWithOrder.length > 0) {
 //         const possibleBatchId = 
 //           rowsWithOrder[0].batch_id || 
@@ -86,6 +83,180 @@
 //     }
     
 //   }, [data]);
+
+//   // Функция для экспорта в Excel
+//   const exportToExcel = () => {
+//     if (!rows.length) {
+//       alert("Нет данных для экспорта");
+//       return;
+//     }
+
+//     // Спросим пользователя о формате
+//     const useOldFormat = confirm(
+//       "Выберите формат экспорта:\n\n" +
+//       "OK - XLS (старый Excel 97-2003)\n" +
+//       "Отмена - CSV (откроется в современном Excel)\n\n" +
+//       "XLS рекомендуется для очень старых версий Excel."
+//     );
+
+//     setExportLoading(true);
+//     setDebugInfo("Подготовка экспорта...");
+
+//     setTimeout(() => {
+//       try {
+//         if (useOldFormat) {
+//           // Экспорт в XLS (старый формат)
+//           exportToXLS();
+//         } else {
+//           // Экспорт в CSV (откроется в Excel)
+//           exportToCSV();
+//         }
+        
+//         setDebugInfo(`✅ Экспорт завершен: ${rows.length} строк`);
+//       } catch (error) {
+//         console.error("Ошибка при экспорте:", error);
+//         setDebugInfo(`❌ Ошибка: ${error.message}`);
+//         alert(`Ошибка при экспорте: ${error.message}`);
+//       } finally {
+//         setExportLoading(false);
+//       }
+//     }, 100);
+//   };
+
+//   // Экспорт в XLS (старый формат Excel)
+//   const exportToXLS = () => {
+//     // Создаем заголовки
+//     const headers = [
+//       "Поставщик",
+//       "Реквизиты счета",
+//       "Контрагент",
+//       "Плательщик",
+//       "Сумма",
+//       "в т.ч НДС",
+//       "Учтено",
+//       "Система расчетов",
+//       "Комментарий",
+//       "Техника",
+//       "г.н"
+//     ];
+
+//     // Создаем данные
+//     const dataRows = rows.map((row) => {
+//       const invoiceDetails = row.invoice_details || {};
+      
+//       let invoiceText = "";
+//       if (invoiceDetails.invoice_full_text) {
+//         invoiceText = invoiceDetails.invoice_full_text;
+//       } else if (invoiceDetails.invoice_number && invoiceDetails.invoice_date) {
+//         invoiceText = `Счет на оплату № ${invoiceDetails.invoice_number} от ${invoiceDetails.invoice_date}`;
+//       }
+
+//       return [
+//         row.supplier || "",
+//         invoiceText,
+//         row.contractor || "",
+//         row.payer || "Сибуглеснаб",
+//         row.amount || 0,
+//         row.vat_amount || 0,
+//         row.included_in_plan ? "Да" : "Нет",
+//         row.payment_system || "Предоплата",
+//         row.comment || "",
+//         row.vehicle || "",
+//         row.license_plate || ""
+//       ];
+//     });
+
+//     // Создаем полное содержимое с заголовком
+//     const title = [
+//       ["Реестр платежей"],
+//       [`Экспортировано: ${new Date().toLocaleString('ru-RU')}`],
+//       [`Всего строк: ${rows.length}`],
+//       [`С привязанными счетами: ${rows.filter(r => r.invoice_id).length}`],
+//       [`Batch ID: ${batchId || 'не указан'}`],
+//       []
+//     ];
+
+//     const fullContent = [...title, headers, ...dataRows];
+
+//     // Конвертируем в CSV с разделителем табуляции (лучше для Excel)
+//     const csvContent = fullContent.map(row => 
+//       row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join('\t')
+//     ).join('\n');
+
+//     // Создаем файл с расширением .xls
+//     const blob = new Blob(['\uFEFF' + csvContent], { 
+//       type: 'text/plain;charset=utf-8'
+//     });
+    
+//     const fileName = `реестр_${batchId ? batchId.slice(0, 8) : "без_batch"}_${new Date().toISOString().slice(0, 10)}.xls`;
+//     const link = document.createElement("a");
+//     const url = URL.createObjectURL(blob);
+    
+//     link.href = url;
+//     link.download = fileName;
+//     document.body.appendChild(link);
+//     link.click();
+//     document.body.removeChild(link);
+//     URL.revokeObjectURL(url);
+//   };
+
+//   // Экспорт в CSV (откроется в современном Excel)
+//   const exportToCSV = () => {
+//     const headers = [
+//       "Поставщик",
+//       "Реквизиты счета",
+//       "Контрагент",
+//       "Плательщик",
+//       "Сумма",
+//       "в т.ч НДС",
+//       "Учтено",
+//       "Система расчетов",
+//       "Комментарий",
+//       "Техника",
+//       "г.н"
+//     ].join(";");
+
+//     const dataRows = rows.map((row) => {
+//       const invoiceDetails = row.invoice_details || {};
+      
+//       let invoiceText = "";
+//       if (invoiceDetails.invoice_full_text) {
+//         invoiceText = invoiceDetails.invoice_full_text;
+//       } else if (invoiceDetails.invoice_number && invoiceDetails.invoice_date) {
+//         invoiceText = `Счет на оплату № ${invoiceDetails.invoice_number} от ${invoiceDetails.invoice_date}`;
+//       }
+
+//       return [
+//         `"${(row.supplier || "").replace(/"/g, '""')}"`,
+//         `"${invoiceText.replace(/"/g, '""')}"`,
+//         `"${(row.contractor || "").replace(/"/g, '""')}"`,
+//         `"${(row.payer || "").replace(/"/g, '""')}"`,
+//         row.amount || 0,
+//         row.vat_amount || 0,
+//         row.included_in_plan ? "Да" : "Нет",
+//         `"${(row.payment_system || "").replace(/"/g, '""')}"`,
+//         `"${(row.comment || "").replace(/"/g, '""')}"`,
+//         `"${(row.vehicle || "").replace(/"/g, '""')}"`,
+//         `"${(row.license_plate || "").replace(/"/g, '""')}"`
+//       ].join(";");
+//     });
+
+//     const csvContent = [headers, ...dataRows].join("\n");
+//     const blob = new Blob(['\uFEFF' + csvContent], { 
+//       type: 'text/csv;charset=utf-8;'
+//     });
+    
+//     const fileName = `реестр_${batchId ? batchId.slice(0, 8) : "без_batch"}_${new Date().toISOString().slice(0, 10)}.csv`;
+//     const link = document.createElement("a");
+//     const url = URL.createObjectURL(blob);
+    
+//     link.href = url;
+//     link.download = fileName;
+//     document.body.appendChild(link);
+//     link.click();
+//     document.body.removeChild(link);
+//     URL.revokeObjectURL(url);
+//   };
 
 //   // Функция для загрузки счетов
 //   const loadInvoices = useCallback((batchId) => {
@@ -138,7 +309,7 @@
 
 //   const handleRowSelect = (index) => {
 //     setSelectedRowIndex(index);
-//     setLastUpdatedRowId(null); // Сбрасываем подсветку при выборе новой строки
+//     setLastUpdatedRowId(null);
 //   };
 
 //   const handleMatchClick = () => {
@@ -201,23 +372,15 @@
 //     .then(result => {
 //       console.log("✅ Apply response:", result);
 //       if (result.status === "ok") {
-//         // Обновляем строку локально ДО полной перезагрузки
 //         updateRowLocally(registryId, invoiceId, result);
-        
-//         // Показываем сообщение
 //         alert("✅ Счет успешно применен!");
-        
-//         // Устанавливаем ID обновленной строки для подсветки
 //         setLastUpdatedRowId(registryId);
-        
-//         // Закрываем модалку
 //         setMatchInvoice(null);
         
-//         // Обновляем данные через родительский компонент с небольшой задержкой
 //         if (onReload) {
 //           setTimeout(() => {
 //             onReload();
-//           }, 1000); // Даем время увидеть обновленную строку
+//           }, 1000);
 //         }
 //       } else {
 //         throw new Error(result.message || "Ошибка применения");
@@ -233,26 +396,22 @@
 //     });
 //   };
 
-//   // Локальное обновление строки после привязки счета
 //   const updateRowLocally = (registryId, invoiceId, result) => {
 //     console.log("🔄 Локальное обновление строки:", registryId);
     
 //     setRows(prevRows => {
 //       return prevRows.map(row => {
 //         if (row.id === registryId) {
-//           // Создаем обновленную строку с сохранением порядка
 //           const updatedRow = {
 //             ...row,
 //             invoice_id: invoiceId,
 //             hasInvoice: true
 //           };
           
-//           // Обновляем invoice_details если они есть в ответе
 //           if (result.invoice_details) {
 //             updatedRow.invoice_details = result.invoice_details;
 //           }
           
-//           // Сохраняем временную метку обновления для анимации
 //           updatedRow.lastUpdated = Date.now();
           
 //           return updatedRow;
@@ -261,38 +420,31 @@
 //       });
 //     });
     
-//     // Сбрасываем выделение
 //     setSelectedRowIndex(null);
 //   };
 
-//   // Обработка успешного применения из модального окна
 //   const handleInvoiceApplied = () => {
 //     console.log("🔄 Информация о привязке обновлена локально");
 //     setSelectedRowIndex(null);
     
-//     // Обновляем данные через родительский компонент
 //     if (onReload) {
 //       setTimeout(() => onReload(), 500);
 //     }
 //   };
 
-//   // Восстановление порядка после перезагрузки данных
 //   useEffect(() => {
 //     if (rows.length > 0 && originalRows.length > 0) {
-//       // Создаем маппинг ID строк на их порядок из originalRows
 //       const orderMap = new Map();
 //       originalRows.forEach((row, index) => {
 //         orderMap.set(row.id, index);
 //       });
       
-//       // Сортируем текущие строки по сохраненному порядку
 //       const sortedRows = [...rows].sort((a, b) => {
 //         const orderA = orderMap.get(a.id) || a.displayOrder || 0;
 //         const orderB = orderMap.get(b.id) || b.displayOrder || 0;
 //         return orderA - orderB;
 //       });
       
-//       // Обновляем только если порядок изменился
 //       const needsSorting = sortedRows.some((row, index) => row.id !== rows[index]?.id);
 //       if (needsSorting) {
 //         console.log("🔄 Восстановление порядка строк");
@@ -310,12 +462,10 @@
 //     );
 //   }
 
-//   // Подсчитываем статистику
 //   const rowsWithInvoice = rows.filter(r => r.invoice_id).length;
 
 //   return (
 //     <div className="registry-container">
-//       {/* Фиксированный заголовок */}
 //       <div className="registry-header">
 //         <div className="header-content">
 //           <div className="header-left">
@@ -344,23 +494,32 @@
 //               disabled={selectedRowIndex === null || !availableInvoices.length || isLoading}
 //               title={selectedRowIndex === null ? "Выберите строку реестра" : "Сопоставить счет с выбранной строкой"}
 //             >
-//                Сопоставить
+//               🎯 Сопоставить
+//             </button>
+            
+//             <button 
+//               onClick={exportToExcel}
+//               className="header-btn excel-btn"
+//               disabled={!rows.length || exportLoading || isLoading}
+//               title="Экспорт в Excel"
+//             >
+//               {exportLoading ? "⏳" : "📊 Excel"}
 //             </button>
             
 //             <button 
 //               onClick={() => batchId && loadInvoices(batchId)}
 //               className="header-btn refresh-btn"
 //               title="Обновить список счетов"
+//               disabled={isLoading || exportLoading}
 //             >
-//                Обновить
+//               🔄 Обновить
 //             </button>
             
-//             {isLoading && <div className="loading-spinner">🔄 Загрузка...</div>}
+//             {(isLoading || exportLoading) && <div className="loading-spinner">🔄</div>}
 //           </div>
 //         </div>
 //       </div>
 
-//       {/* Скроллируемая таблица */}
 //       <div className="registry-table-container">
 //         <div className="registry-table-wrapper">
 //           <table className="registry-table">
@@ -449,7 +608,6 @@
 //                             {invoiceText}
 //                             {isRecentlyUpdated && <span className="update-badge">НОВОЕ</span>}
 //                           </div>
-//                           {/* УБРАНО: информация о сумме и статусе привязки */}
 //                         </div>
 //                       ) : (
 //                         <span className="no-invoice-text">
@@ -602,7 +760,7 @@
         
 //         .header-right {
 //           display: flex;
-//           gap: 12px;
+//           gap: 10px;
 //           align-items: center;
 //         }
         
@@ -652,16 +810,28 @@
 //           box-shadow: 0 4px 8px rgba(102, 126, 234, 0.4);
 //         }
         
-//         .refresh-btn {
-//           background: #4caf50;
+//         .excel-btn {
+//           background: linear-gradient(135deg, #4CAF50 0%, #2E7D32 100%);
 //           color: white;
 //           box-shadow: 0 2px 4px rgba(76, 175, 80, 0.3);
 //         }
         
-//         .refresh-btn:hover {
-//           background: #43a047;
+//         .excel-btn:hover:not(:disabled) {
+//           background: linear-gradient(135deg, #43A047 0%, #1B5E20 100%);
 //           transform: translateY(-2px);
 //           box-shadow: 0 4px 8px rgba(76, 175, 80, 0.4);
+//         }
+        
+//         .refresh-btn {
+//           background: linear-gradient(135deg, #2196F3 0%, #0D47A1 100%);
+//           color: white;
+//           box-shadow: 0 2px 4px rgba(33, 150, 243, 0.3);
+//         }
+        
+//         .refresh-btn:hover:not(:disabled) {
+//           background: linear-gradient(135deg, #1E88E5 0%, #1565C0 100%);
+//           transform: translateY(-2px);
+//           box-shadow: 0 4px 8px rgba(33, 150, 243, 0.4);
 //         }
         
 //         .registry-table-container {
@@ -793,8 +963,6 @@
 //           100% { opacity: 1; }
 //         }
         
-//         /* УБРАНЫ СТИЛИ ДЛЯ invoice-amount, invoice-status, status-badge, invoice-id */
-        
 //         .no-invoice-text {
 //           font-style: italic;
 //           color: #90a4ae;
@@ -865,11 +1033,13 @@
 //         }
         
 //         .loading-spinner {
-//           padding: 8px 16px;
+//           padding: 8px 12px;
 //           background-color: #e3f2fd;
 //           color: #1565c0;
 //           border-radius: 4px;
 //           font-size: 14px;
+//           min-width: 40px;
+//           text-align: center;
 //         }
         
 //         .registry-table tbody tr {
@@ -881,8 +1051,7 @@
 // };
 
 // export default RegistryPreview;
-
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback, useRef } from "react";
 import InvoiceMatchModal from "./InvoiceMatchModal";
 import "../styles.css";
 
@@ -895,11 +1064,217 @@ const RegistryPreview = ({ data, onReload }) => {
   const [matchInvoice, setMatchInvoice] = useState(null);
   const [availableInvoices, setAvailableInvoices] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
-  const [exportLoading, setExportLoading] = useState(false); // Новое состояние для экспорта
+  const [exportLoading, setExportLoading] = useState(false);
   const [debugInfo, setDebugInfo] = useState("");
   const [batchId, setBatchId] = useState("");
   const [selectedRowIndex, setSelectedRowIndex] = useState(null);
   const [lastUpdatedRowId, setLastUpdatedRowId] = useState(null);
+  
+  // WebSocket состояния
+  const [wsConnected, setWsConnected] = useState(false);
+  const [notifications, setNotifications] = useState([]);
+  const wsRef = useRef(null);
+  const userId = localStorage.getItem('userId') || `user_${Math.random().toString(36).substr(2, 9)}`;
+
+  // Инициализация WebSocket
+  useEffect(() => {
+    // Сохраняем userId если его нет
+    if (!localStorage.getItem('userId')) {
+      localStorage.setItem('userId', userId);
+    }
+
+    const connectWebSocket = () => {
+      try {
+        const ws = new WebSocket(`ws://localhost:8000/ws/${userId}`);
+        
+        ws.onopen = () => {
+          console.log('✅ WebSocket connected');
+          setWsConnected(true);
+          setDebugInfo('WebSocket подключен');
+          
+          // Подписываемся на batch если есть
+          if (batchId) {
+            ws.send(JSON.stringify({
+              type: 'subscribe',
+              batch_id: batchId
+            }));
+          }
+        };
+        
+        ws.onmessage = (event) => {
+          try {
+            const data = JSON.parse(event.data);
+            console.log('📨 WebSocket message:', data);
+            
+            // Обрабатываем разные типы сообщений
+            switch (data.type) {
+              case 'invoice_processed':
+                handleInvoiceProcessed(data);
+                break;
+              
+              case 'invoice_applied':
+                handleInvoiceApplied(data);
+                break;
+              
+              case 'registry_updated':
+                handleRegistryUpdated(data);
+                break;
+              
+              case 'processing_status':
+                handleProcessingStatus(data);
+                break;
+              
+              case 'subscribed':
+                console.log(`✅ Подписан на batch: ${data.batch_id}`);
+                break;
+              
+              case 'pong':
+                // Ответ на ping, можно обновить timestamp
+                break;
+              
+              default:
+                console.log('Получено сообщение:', data);
+            }
+            
+            // Добавляем в историю уведомлений
+            setNotifications(prev => [...prev.slice(-9), data]);
+            
+          } catch (error) {
+            console.error('Ошибка обработки WebSocket сообщения:', error);
+          }
+        };
+        
+        ws.onclose = () => {
+          console.log('❌ WebSocket disconnected');
+          setWsConnected(false);
+          setDebugInfo('WebSocket отключен - переподключение...');
+          
+          // Переподключаемся через 3 секунды
+          setTimeout(connectWebSocket, 3000);
+        };
+        
+        ws.onerror = (error) => {
+          console.error('WebSocket error:', error);
+          setDebugInfo(`WebSocket ошибка: ${error.message}`);
+        };
+        
+        wsRef.current = ws;
+        
+        // Ping каждые 30 секунд для поддержания соединения
+        const pingInterval = setInterval(() => {
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: 'ping' }));
+          }
+        }, 30000);
+        
+        return () => {
+          clearInterval(pingInterval);
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.close();
+          }
+        };
+        
+      } catch (error) {
+        console.error('Ошибка подключения WebSocket:', error);
+        setDebugInfo(`Ошибка подключения: ${error.message}`);
+      }
+    };
+    
+    connectWebSocket();
+    
+    return () => {
+      if (wsRef.current?.readyState === WebSocket.OPEN) {
+        wsRef.current.close();
+      }
+    };
+  }, [userId]);
+
+  // Обработчик: обработка счета завершена
+  const handleInvoiceProcessed = (data) => {
+    console.log(`✅ Счет обработан: ${data.filename}`);
+    setDebugInfo(`Счет ${data.filename} обработан`);
+    
+    // Показываем уведомление
+    if ('Notification' in window && Notification.permission === 'granted') {
+      new Notification('Счет обработан', {
+        body: `${data.filename} готов для сопоставления`,
+        icon: '/favicon.ico'
+      });
+    }
+    
+    // Обновляем список счетов
+    if (batchId && batchId === data.batch_id) {
+      loadInvoices(batchId);
+    }
+    
+    // Обновляем реестр если нужно
+    if (onReload) {
+      setTimeout(() => onReload(), 1000);
+    }
+  };
+
+  // Обработчик: счет применен к строке (WebSocket)
+  const handleInvoiceApplied = (data) => {
+    console.log(`✅ Счет применен к строке ${data.registry_id}`);
+    setDebugInfo(`Счет применен к строке ${data.registry_id}`);
+    setLastUpdatedRowId(data.registry_id);
+    
+    // Обновляем локально строку
+    setRows(prevRows => 
+      prevRows.map(row => 
+        row.id === data.registry_id 
+          ? { 
+              ...row, 
+              invoice_id: data.invoice_id,
+              hasInvoice: true,
+              contractor: data.contractor || row.contractor,
+              lastUpdated: Date.now()
+            } 
+          : row
+      )
+    );
+  };
+
+  // Обработчик локального обновления (после закрытия модального окна)
+  const handleLocalInvoiceApplied = () => {
+    console.log("🔄 Информация о привязке обновлена локально");
+    setSelectedRowIndex(null);
+    
+    if (onReload) {
+      setTimeout(() => onReload(), 500);
+    }
+  };
+
+  // Обработчик: обновление реестра
+  const handleRegistryUpdated = (data) => {
+    console.log(`📋 Реестр обновлен: ${data.action}`);
+    if (data.action === 'created' || data.action === 'invoices_matched') {
+      if (onReload) {
+        setTimeout(() => onReload(), 500);
+      }
+    }
+  };
+
+  // Обработчик: статус обработки
+  const handleProcessingStatus = (data) => {
+    console.log(`🔄 Статус обработки: ${data.status}`);
+    if (data.progress !== undefined) {
+      setDebugInfo(`Обработка: ${data.status} (${data.progress}%)`);
+    } else {
+      setDebugInfo(`Обработка: ${data.status}`);
+    }
+  };
+
+  // Подписка на batch при изменении batchId
+  useEffect(() => {
+    if (wsRef.current?.readyState === WebSocket.OPEN && batchId) {
+      wsRef.current.send(JSON.stringify({
+        type: 'subscribe',
+        batch_id: batchId
+      }));
+      console.log(`✅ Подписан на batch: ${batchId}`);
+    }
+  }, [batchId]);
 
   // Инициализация строк - сохраняем оригинальный порядок
   useEffect(() => {
@@ -927,7 +1302,7 @@ const RegistryPreview = ({ data, onReload }) => {
     
     if (registryData.length > 0) {
       console.log(`✅ Using ${registryData.length} registry items`);
-      setDebugInfo(`Получено ${registryData.length} строк реестра`);
+      setDebugInfo(`Получено ${registryData.length} строк реестра ${wsConnected ? '⚡' : ''}`);
       
       const rowsWithOrder = registryData.map((r, index) => ({
         ...r,
@@ -974,7 +1349,6 @@ const RegistryPreview = ({ data, onReload }) => {
       return;
     }
 
-    // Спросим пользователя о формате
     const useOldFormat = confirm(
       "Выберите формат экспорта:\n\n" +
       "OK - XLS (старый Excel 97-2003)\n" +
@@ -988,10 +1362,8 @@ const RegistryPreview = ({ data, onReload }) => {
     setTimeout(() => {
       try {
         if (useOldFormat) {
-          // Экспорт в XLS (старый формат)
           exportToXLS();
         } else {
-          // Экспорт в CSV (откроется в Excel)
           exportToCSV();
         }
         
@@ -1006,9 +1378,8 @@ const RegistryPreview = ({ data, onReload }) => {
     }, 100);
   };
 
-  // Экспорт в XLS (старый формат Excel)
+  // Экспорт в XLS
   const exportToXLS = () => {
-    // Создаем заголовки
     const headers = [
       "Поставщик",
       "Реквизиты счета",
@@ -1023,7 +1394,6 @@ const RegistryPreview = ({ data, onReload }) => {
       "г.н"
     ];
 
-    // Создаем данные
     const dataRows = rows.map((row) => {
       const invoiceDetails = row.invoice_details || {};
       
@@ -1049,7 +1419,6 @@ const RegistryPreview = ({ data, onReload }) => {
       ];
     });
 
-    // Создаем полное содержимое с заголовком
     const title = [
       ["Реестр платежей"],
       [`Экспортировано: ${new Date().toLocaleString('ru-RU')}`],
@@ -1060,13 +1429,10 @@ const RegistryPreview = ({ data, onReload }) => {
     ];
 
     const fullContent = [...title, headers, ...dataRows];
-
-    // Конвертируем в CSV с разделителем табуляции (лучше для Excel)
     const csvContent = fullContent.map(row => 
       row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join('\t')
     ).join('\n');
 
-    // Создаем файл с расширением .xls
     const blob = new Blob(['\uFEFF' + csvContent], { 
       type: 'text/plain;charset=utf-8'
     });
@@ -1083,7 +1449,7 @@ const RegistryPreview = ({ data, onReload }) => {
     URL.revokeObjectURL(url);
   };
 
-  // Экспорт в CSV (откроется в современном Excel)
+  // Экспорт в CSV
   const exportToCSV = () => {
     const headers = [
       "Поставщик",
@@ -1215,22 +1581,44 @@ const RegistryPreview = ({ data, onReload }) => {
     });
   };
 
-  const handleManualApply = (invoiceId, registryId, applyType, lineNo) => {
+  const handleManualApply = (invoiceId, registryId, applyType, lineNos) => {
     setIsLoading(true);
     setDebugInfo(`Применение счета ${invoiceId?.slice(0,8) || 'unknown'}...`);
     
     let endpoint, requestBody;
+    const currentBatchId = batchId || rows[0]?.batch_id;
     
-    if (applyType === "full" && lineNo !== undefined) {
-      endpoint = "http://localhost:8000/invoice/apply-line";
+    if (applyType === "full" && lineNos && lineNos.length > 0) {
+      // Применение выбранных строк
+      if (lineNos.length === 1) {
+        // Одна строка
+        endpoint = "http://localhost:8000/invoice/apply-line";
+        requestBody = {
+          invoice_id: invoiceId,
+          line_no: lineNos[0],
+          registry_id: registryId,
+        };
+      } else {
+        // Несколько строк
+        endpoint = "http://localhost:8000/invoice/apply-multiple-lines";
+        requestBody = {
+          invoice_id: invoiceId,
+          line_nos: lineNos,
+          registry_id: registryId,
+          batch_id: currentBatchId
+        };
+      }
+    } else if (applyType === "full" && (!lineNos || lineNos.length === 0)) {
+      // Применение всего счета
+      endpoint = "http://localhost:8000/invoice/apply-all-lines";
       requestBody = {
         invoice_id: invoiceId,
-        line_no: lineNo,
         registry_id: registryId,
+        batch_id: currentBatchId
       };
     } else {
+      // Ручное сопоставление
       endpoint = "http://localhost:8000/invoice/manual-match";
-      const currentBatchId = batchId || rows[0]?.batch_id;
       requestBody = {
         batch_id: currentBatchId,
         registry_id: registryId,
@@ -1255,6 +1643,17 @@ const RegistryPreview = ({ data, onReload }) => {
     .then(result => {
       console.log("✅ Apply response:", result);
       if (result.status === "ok") {
+        // Отправляем WebSocket уведомление
+        if (wsRef.current?.readyState === WebSocket.OPEN) {
+          wsRef.current.send(JSON.stringify({
+            type: 'invoice_applied',
+            batch_id: currentBatchId,
+            invoice_id: invoiceId,
+            registry_id: registryId,
+            contractor: result.contractor
+          }));
+        }
+        
         updateRowLocally(registryId, invoiceId, result);
         alert("✅ Счет успешно применен!");
         setLastUpdatedRowId(registryId);
@@ -1306,15 +1705,6 @@ const RegistryPreview = ({ data, onReload }) => {
     setSelectedRowIndex(null);
   };
 
-  const handleInvoiceApplied = () => {
-    console.log("🔄 Информация о привязке обновлена локально");
-    setSelectedRowIndex(null);
-    
-    if (onReload) {
-      setTimeout(() => onReload(), 500);
-    }
-  };
-
   useEffect(() => {
     if (rows.length > 0 && originalRows.length > 0) {
       const orderMap = new Map();
@@ -1352,7 +1742,7 @@ const RegistryPreview = ({ data, onReload }) => {
       <div className="registry-header">
         <div className="header-content">
           <div className="header-left">
-            <h3> Предпросмотр реестра</h3>
+            <h3> Предпросмотр реестра {wsConnected ? '⚡' : '🔌'}</h3>
             <p className="header-stats">
               Всего строк: <strong>{rows.length}</strong> | 
               С привязанными счетами: <strong style={{ color: rowsWithInvoice > 0 ? "#28a745" : "#dc3545" }}>
@@ -1369,6 +1759,13 @@ const RegistryPreview = ({ data, onReload }) => {
           <div className="header-right">
             <div className="debug-info">
               <div>{debugInfo}</div>
+              <div className="ws-status" style={{ 
+                fontSize: '10px', 
+                color: wsConnected ? '#28a745' : '#dc3545',
+                marginTop: '2px'
+              }}>
+                {wsConnected ? '⚡ WebSocket подключен' : '🔌 WebSocket отключен'}
+              </div>
             </div>
             
             <button 
@@ -1602,7 +1999,7 @@ const RegistryPreview = ({ data, onReload }) => {
             setMatchInvoice(null);
             setSelectedRowIndex(null);
           }}
-          onApplied={handleInvoiceApplied}
+          onApplied={handleLocalInvoiceApplied}
           onManualApply={handleManualApply}
         />
       )}

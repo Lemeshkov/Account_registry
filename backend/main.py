@@ -1,4 +1,3 @@
-
 # backend/main.py
 from fastapi import (
     FastAPI,
@@ -20,11 +19,13 @@ import logging
 from collections import defaultdict
 from pydantic import BaseModel
 from typing import List, Dict, Any
-from .database import get_db, engine, SessionLocal
-from .models import Base, PaymentRegistry, InvoiceLine
-from .parsers.excel_parser import ExcelParser
-from .parsers.invoice_parser import parse_invoice_from_pdf
-from .crud import (
+
+# Исправляем импорты - убираем точки
+from database import get_db, engine, SessionLocal
+from models import Base, PaymentRegistry, InvoiceLine
+from parsers.excel_parser import ExcelParser
+from parsers.invoice_parser import parse_invoice_from_pdf
+from crud import (
     build_registry_from_batch,
     apply_invoice_ocr_to_registry,
     create_imported_request,
@@ -33,8 +34,11 @@ from .crud import (
     update_registry_position,
     reorder_registry_batch,
 )
-from .services.invoice_matcher import try_match_invoice
-from .services.invoice_buffer import (
+from redis_manager import redis_manager
+from fastapi import WebSocket, WebSocketDisconnect
+import asyncio
+from services.invoice_matcher import try_match_invoice
+from services.invoice_buffer import (
     list_invoices,
     add_invoice,
     save_invoice_lines,
@@ -43,6 +47,8 @@ from .services.invoice_buffer import (
 )
 
 log = logging.getLogger(__name__)
+# WebSocket Manager импорт
+from websocket_manager import websocket_manager
 
 # -------------------------------------------------------------------
 # APP
@@ -83,8 +89,10 @@ class ApplyAllLinesRequest(BaseModel):
     batch_id: str    
 
 @app.on_event("startup")
-def on_startup():
-    Base.metadata.create_all(bind=engine)
+async def startup_event():
+    """Действия при запуске приложения"""
+    await redis_manager.connect()
+    print("🚀 Application started with Redis support")
 
 app.add_middleware(
     CORSMiddleware,
@@ -94,7 +102,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-BASE_UPLOAD_DIR = Path("backend/uploads")
+BASE_UPLOAD_DIR = Path("uploads")
 BASE_UPLOAD_DIR.mkdir(exist_ok=True)
 
 app.mount("/uploads", StaticFiles(directory=BASE_UPLOAD_DIR), name="uploads")
@@ -103,99 +111,27 @@ app.mount("/uploads", StaticFiles(directory=BASE_UPLOAD_DIR), name="uploads")
 # BACKGROUND OCR TASK
 # -------------------------------------------------------------------
 
-# def process_invoice_pdf_background(file_path: Path, batch_id: str):
-#     db = SessionLocal()
-#     try:
-#         # 1. Парсим PDF
-#         parsed = parse_invoice_from_pdf(file_path)
-#         if not parsed:
-#             log.error("[OCR] Failed to parse PDF: %s", file_path.name)
-#             return
-        
-#         print(f"\n=== DEBUG: parse_invoice_from_pdf result ===")
-#         print(f"Contractor: {parsed.get('data', {}).get('contractor')}")
-#         print(f"Invoice number: {parsed.get('data', {}).get('invoice_number')}")
-#         print(f"Invoice date: {parsed.get('data', {}).get('invoice_date')}")
-        
-#         # 2. Добавляем ID и информацию о batch
-#         invoice_id = str(uuid.uuid4())
-#         parsed["id"] = invoice_id
-#         parsed["batch_id"] = batch_id
-#         parsed["file"] = file_path.name
-        
-#         # 3. ВСЕГДА сохраняем строки счета в базу
-#         if parsed.get("lines"):
-#             log.info("[OCR] Saving %d invoice lines to database", len(parsed["lines"]))
-#             save_invoice_lines(
-#                 db,
-#                 invoice_id=invoice_id,
-#                 batch_id=batch_id,
-#                 lines=parsed.get("lines", []),
-#             )
-#         else:
-#             log.warning("[OCR] No product lines found in invoice")
-        
-#         # 4. ВСЕГДА сохраняем счет в буфер (для предпросмотра)
-#         print(f"\n=== DEBUG: Adding to buffer ===")
-#         print(f"Invoice ID: {invoice_id}")
-        
-#         # ОБЕСПЕЧИВАЕМ что data есть
-#         if 'data' not in parsed:
-#             parsed['data'] = {}
-        
-#         # Добавляем обязательные поля если их нет
-#         if 'invoice_full_text' not in parsed['data']:
-#             invoice_number = parsed['data'].get('invoice_number')
-#             invoice_date = parsed['data'].get('invoice_date')
-#             if invoice_number and invoice_date:
-#                 parsed['data']['invoice_full_text'] = f"Счет на оплату № {invoice_number} от {invoice_date}"
-#             elif invoice_number:
-#                 parsed['data']['invoice_full_text'] = f"Счет на оплату № {invoice_number}"
-#             elif invoice_date:
-#                 parsed['data']['invoice_full_text'] = f"Счет от {invoice_date}"
-        
-#         # Сохраняем в буфер
-#         add_invoice(parsed)
-        
-#         # 5. Фиксируем только строки товаров, НЕ изменяем реестр
-#         db.commit()
-#         log.info("[OCR] Processing complete for %s", file_path.name)
-#         print(f"[DEBUG] Invoice saved to buffer: {invoice_id}")
-#         print(f"[DEBUG] NO automatic application to registry!")
-        
-#     except Exception as e:
-#         db.rollback()
-#         log.exception("[OCR] Failed to process invoice %s: %s", file_path.name, str(e))
-#         print(f"\n=== DEBUG: EXCEPTION ===")
-#         print(f"Error processing invoice: {str(e)}")
-#         import traceback
-#         traceback.print_exc()
-#     finally:
-#         db.close()
-#         print(f"[DEBUG] Database connection closed")
-
 def process_invoice_pdf_background(file_path: Path, batch_id: str):
     db = SessionLocal()
     try:
-        # 1. Парсим PDF (теперь только таблицы + метаданные из universal_parser)
+        # 1. Парсим PDF
         parsed = parse_invoice_from_pdf(file_path)
-        
         if not parsed:
             log.error("[OCR] Failed to parse PDF: %s", file_path.name)
             return
         
-        print(f"\n=== DEBUG: Parser result ===")
+        print(f"\n=== DEBUG: parse_invoice_from_pdf result ===")
         print(f"Contractor: {parsed.get('data', {}).get('contractor')}")
         print(f"Invoice number: {parsed.get('data', {}).get('invoice_number')}")
-        print(f"Lines found: {len(parsed.get('lines', []))}")
+        print(f"Invoice date: {parsed.get('data', {}).get('invoice_date')}")
         
-        # 2. ГАРАНТИРУЕМ наличие необходимых полей
+        # 2. Добавляем ID и информацию о batch
         invoice_id = str(uuid.uuid4())
         parsed["id"] = invoice_id
         parsed["batch_id"] = batch_id
-        parsed["file"] = str(file_path.name)
+        parsed["file"] = file_path.name
         
-        # 3. Сохраняем строки товаров (если есть)
+        # 3. ВСЕГДА сохраняем строки счета в базу
         if parsed.get("lines"):
             log.info("[OCR] Saving %d invoice lines to database", len(parsed["lines"]))
             save_invoice_lines(
@@ -204,58 +140,60 @@ def process_invoice_pdf_background(file_path: Path, batch_id: str):
                 batch_id=batch_id,
                 lines=parsed.get("lines", []),
             )
+        else:
+            log.warning("[OCR] No product lines found in invoice")
         
-        # 4. ВСЕГДА сохраняем счет в буфер (даже если нет товаров)
+        # 4. ВСЕГДА сохраняем счет в буфер (для предпросмотра)
         print(f"\n=== DEBUG: Adding to buffer ===")
         print(f"Invoice ID: {invoice_id}")
-        print(f"Batch ID: {batch_id}")
         
-        # Гарантируем наличие invoice_full_text для фронтенда
-        data = parsed.get('data', {})
-        if 'invoice_full_text' not in data or not data['invoice_full_text']:
-            invoice_number = data.get('invoice_number')
-            invoice_date = data.get('invoice_date')
-            contractor = data.get('contractor')
-            
+        # ОБЕСПЕЧИВАЕМ что data есть
+        if 'data' not in parsed:
+            parsed['data'] = {}
+        
+        # Добавляем обязательные поля если их нет
+        if 'invoice_full_text' not in parsed['data']:
+            invoice_number = parsed['data'].get('invoice_number')
+            invoice_date = parsed['data'].get('invoice_date')
             if invoice_number and invoice_date:
-                data['invoice_full_text'] = f"Счет на оплату № {invoice_number} от {invoice_date}"
+                parsed['data']['invoice_full_text'] = f"Счет на оплату № {invoice_number} от {invoice_date}"
             elif invoice_number:
-                data['invoice_full_text'] = f"Счет на оплату № {invoice_number}"
-            elif contractor:
-                data['invoice_full_text'] = f"Счет от {contractor}"
-            else:
-                data['invoice_full_text'] = f"Счет: {file_path.name}"
+                parsed['data']['invoice_full_text'] = f"Счет на оплату № {invoice_number}"
+            elif invoice_date:
+                parsed['data']['invoice_full_text'] = f"Счет от {invoice_date}"
         
         # Сохраняем в буфер
         add_invoice(parsed)
         
+        # 5. Фиксируем только строки товаров, НЕ изменяем реестр
         db.commit()
         log.info("[OCR] Processing complete for %s", file_path.name)
         print(f"[DEBUG] Invoice saved to buffer: {invoice_id}")
+        print(f"[DEBUG] NO automatic application to registry!")
+        
+        # Отправляем уведомление о завершении обработки
+        try:
+            websocket_manager.broadcast_to_batch(batch_id, {
+                "type": "invoice_processed",
+                "batch_id": batch_id,
+                "invoice_id": invoice_id,
+                "filename": file_path.name,
+                "contractor": parsed.get('data', {}).get('contractor'),
+                "status": "completed"
+            })
+        except Exception as e:
+            log.error(f"Failed to send WebSocket notification: {e}")
         
     except Exception as e:
         db.rollback()
         log.exception("[OCR] Failed to process invoice %s: %s", file_path.name, str(e))
-        
-        # Даже при ошибке создаем минимальный счет для буфера
-        try:
-            minimal_invoice = {
-                "id": str(uuid.uuid4()),
-                "batch_id": batch_id,
-                "file": str(file_path.name),
-                "data": {
-                    "error": str(e),
-                    "invoice_full_text": f"Ошибка парсинга: {file_path.name}",
-                },
-                "lines": [],
-                "confidence": 0.1,
-            }
-            add_invoice(minimal_invoice)
-            print(f"[DEBUG] Minimal invoice added despite error")
-        except:
-            pass
+        print(f"\n=== DEBUG: EXCEPTION ===")
+        print(f"Error processing invoice: {str(e)}")
+        import traceback
+        traceback.print_exc()
     finally:
         db.close()
+        print(f"[DEBUG] Database connection closed")
 
 # -------------------------------------------------------------------
 # APPLY INVOICE LINE 
@@ -307,7 +245,7 @@ def apply_invoice_line(payload: ApplyInvoiceLineRequest, db: Session = Depends(g
         "confidence": invoice.get("confidence", 0)
     }
 
-    #  Применяем счет к строке реестра с указанием номера строки
+    # Применяем счет к строке реестра с указанием номера строки
     apply_invoice_ocr_to_registry(
         db, 
         registry.id, 
@@ -322,12 +260,24 @@ def apply_invoice_line(payload: ApplyInvoiceLineRequest, db: Session = Depends(g
 
     db.commit()
 
+    try:
+        # Уведомляем об успешном применении счета
+        websocket_manager.broadcast_to_batch(registry.imported_batch, {
+            "type": "invoice_applied",
+            "batch_id": registry.imported_batch,
+            "registry_id": registry.id,
+            "invoice_id": payload.invoice_id,
+            "contractor": registry.contractor
+        })
+    except Exception as e:
+        log.error(f"Failed to send WebSocket notification: {e}")
+
     log.info(
         "[APPLY_LINE] APPLIED OK registry_id=%s contractor=%s amount=%s position=%s",
         registry.id,
         registry.contractor,
         registry.amount,
-        registry.position,  #  Показываем позицию строки
+        registry.position,
     )
 
     return {"status": "ok"}
@@ -439,7 +389,6 @@ async def upload_file(
             )
 
             # Создаем строку реестра с сохранением позиции из Excel
-            # Используем позицию первой строки в группе
             registry_item = create_payment_registry_item(
                 db,
                 {
@@ -452,7 +401,7 @@ async def upload_file(
                     "matched_request_id": None,
                 },
                 batch_id,
-                position=first["excel_position"]  #  Передаем позицию из Excel 
+                position=first["excel_position"]  # Передаем позицию из Excel 
             )
             created_items.append(registry_item)
             current_position += 1
@@ -567,7 +516,6 @@ def get_invoice_preview(batch_id: str, db: Session = Depends(get_db)):
         updated_registry.append(item)
     
     # Форматируем данные счетов для фронтенд
-
     invoices_data = []
     for inv in pending_invoices:
         invoice_data = {
@@ -614,34 +562,11 @@ def get_invoice_lines_endpoint(
     invoice_id: str,
     db: Session = Depends(get_db),
 ):
-    lines = (
-        db.query(InvoiceLine)
-        .filter(InvoiceLine.invoice_id == invoice_id)
-        .order_by(InvoiceLine.line_no)
-        .all()
-    )
-
-    return [
-        {
-            "line_no": l.line_no,
-            "description": l.description,
-            "quantity": l.quantity,
-            "price": float(l.price) if l.price else None,
-            "total": float(l.total) if l.total else None,
-            "used": l.used,
-        }
-        for l in lines
-    ]
-
-@app.get("/invoice/{invoice_id}/lines")
-def get_invoice_lines_endpoint(
-    invoice_id: str,
-    db: Session = Depends(get_db),
-):
     print(f"\n=== DEBUG /invoice/{invoice_id}/lines ===")
     
     # 1. Проверяем что строка счета существует в буфере
-    from backend.services.invoice_buffer import get_invoice, list_invoices  # Импорт буфера
+    # Импорт внутри функции чтобы избежать циклического импорта
+    from services.invoice_buffer import get_invoice
     
     invoice_in_buffer = get_invoice(invoice_id)
     print(f"Invoice in buffer: {invoice_in_buffer is not None}")
@@ -705,52 +630,6 @@ def get_invoice_lines_endpoint(
         print(f"Check if invoice was parsed correctly and lines were saved.")
     
     return result
-
-# @app.get("/invoice/{invoice_id}/lines")
-# def get_invoice_lines_endpoint(
-#     invoice_id: str,
-#     db: Session = Depends(get_db),
-# ):
-#     print(f"\n=== DEBUG /invoice/{invoice_id}/lines ===")
-    
-#     # 1. Проверяем что строка счета существует в буфере
-#     invoice_in_buffer = get_invoice(invoice_id)
-#     print(f"Invoice in buffer: {invoice_in_buffer is not None}")
-#     if invoice_in_buffer:
-#         print(f"Buffer lines count: {len(invoice_in_buffer.get('lines', []))}")
-    
-#     # 2. Проверяем строки в базе данных
-#     lines = (
-#         db.query(InvoiceLine)
-#         .filter(InvoiceLine.invoice_id == invoice_id)
-#         .order_by(InvoiceLine.line_no)
-#         .all()
-#     )
-    
-#     print(f"Lines in database: {len(lines)}")
-#     for line in lines:
-#         print(f"  Line {line.line_no}: '{line.description[:30]}...' qty={line.quantity}, price={line.price}, total={line.total}")
-    
-#     # 3. Форматируем результат
-#     result = []
-#     for l in lines:
-#         try:
-#             line_data = {
-#                 "line_no": l.line_no,
-#                 "description": l.description,
-#                 "quantity": l.quantity,
-#                 "price": float(l.price) if l.price else None,
-#                 "total": float(l.total) if l.total else None,
-#                 "used": l.used,
-#             }
-#             result.append(line_data)
-#         except Exception as e:
-#             print(f"  Error formatting line {l.line_no}: {e}")
-    
-#     print(f"Returning {len(result)} lines to frontend")
-    
-#     return result
-
 
 # -------------------------------------------------------------------
 # INVOICES FROM BUFFER
@@ -933,7 +812,7 @@ def manual_invoice_match(payload: ManualInvoiceMatchRequest, db: Session = Depen
         "invoice_id": payload.invoice_id,
         "contractor": registry.contractor,
         "amount": registry.amount,
-        "position": registry.position  #  Возвращаем позицию строки 
+        "position": registry.position
     }
 
 # -------------------------------------------------------------------
@@ -1031,14 +910,16 @@ def get_registry_order(batch_id: str, db: Session = Depends(get_db)):
 def root():
     return {"message": "Registry Control API"}
 
-#-----------отладочный эндпоинт
+# -------------------------------------------------------------------
+# DEBUG ENDPOINTS
+# -------------------------------------------------------------------
 
 @app.get("/debug/invoice/{invoice_id}")
 def debug_invoice_info(invoice_id: str, db: Session = Depends(get_db)):
     """Отладочная информация о счете"""
     
     # Проверяем буфер
-    from backend.services.invoice_buffer import get_invoice, list_invoices
+    from services.invoice_buffer import get_invoice
     
     invoice_in_buffer = get_invoice(invoice_id)
     
@@ -1074,7 +955,7 @@ def debug_invoice_info(invoice_id: str, db: Session = Depends(get_db)):
 @app.get("/debug/check-invoice/{invoice_id}")
 def debug_check_invoice(invoice_id: str, db: Session = Depends(get_db)):
     """Отладочная информация о счете"""
-    from backend.services.invoice_buffer import get_invoice
+    from services.invoice_buffer import get_invoice
     
     # 1. Проверяем буфер
     invoice_in_buffer = get_invoice(invoice_id)
@@ -1116,6 +997,9 @@ def debug_check_invoice(invoice_id: str, db: Session = Depends(get_db)):
         }
     }
 
+# -------------------------------------------------------------------
+# MULTIPLE LINES APPLICATION
+# -------------------------------------------------------------------
 
 @app.post("/invoice/apply-multiple-lines")
 def apply_multiple_invoice_lines(payload: ApplyMultipleLinesRequest, db: Session = Depends(get_db)):
@@ -1307,3 +1191,79 @@ def apply_all_invoice_lines(payload: ApplyAllLinesRequest, db: Session = Depends
         "lines_applied": applied_lines,
         "registry_id": registry.id
     }
+
+# -------------------------------------------------------------------
+# WEB SOCKET SUPPORT
+# -------------------------------------------------------------------
+
+@app.websocket("/ws/{client_id}")
+async def websocket_endpoint(websocket: WebSocket, client_id: str):
+    """WebSocket endpoint для реального времени"""
+    await websocket_manager.connect(websocket, client_id)
+    try:
+        while True:
+            # Получаем сообщения от клиента
+            data = await websocket.receive_json()
+            
+            # Обрабатываем команды
+            if data.get("type") == "subscribe":
+                batch_id = data.get("batch_id")
+                if batch_id:
+                    await websocket_manager.subscribe_to_batch(client_id, batch_id)
+                    await websocket_manager.send_to_client(client_id, {
+                        "type": "subscribed",
+                        "batch_id": batch_id
+                    })
+            
+            elif data.get("type") == "unsubscribe":
+                batch_id = data.get("batch_id")
+                if batch_id:
+                    websocket_manager.unsubscribe_from_batch(client_id, batch_id)
+                    await websocket_manager.send_to_client(client_id, {
+                        "type": "unsubscribed",
+                        "batch_id": batch_id
+                    })
+            
+            elif data.get("type") == "ping":
+                await websocket_manager.send_to_client(client_id, {
+                    "type": "pong",
+                    "timestamp": asyncio.get_event_loop().time()
+                })
+                
+    except WebSocketDisconnect:
+        websocket_manager.disconnect(client_id)
+    except Exception as e:
+        log.error(f"WebSocket error for client {client_id}: {e}")
+        websocket_manager.disconnect(client_id)
+
+# -------------------------------------------------------------------
+# HEALTH CHECK
+# -------------------------------------------------------------------
+
+@app.get("/health")
+async def health_check():
+    """Проверка здоровья сервиса"""
+    return {
+        "status": "healthy",
+        "service": "registry-control-api",
+        "version": "1.0.0",
+        "websocket_connections": len(websocket_manager.active_connections),
+        "batch_subscriptions": len(websocket_manager.batch_subscriptions)
+    }
+
+@app.get("/health/redis")
+async def redis_health():
+    """Проверка Redis"""
+    try:
+        await redis_manager.ping()
+        return {"redis": "connected"}
+    except Exception as e:
+        return {"redis": "disconnected", "error": str(e)}
+
+# -------------------------------------------------------------------
+# STARTUP/SHUTDOWN
+# -------------------------------------------------------------------
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)

@@ -1,3 +1,48 @@
 venv\Scripts\activate
 uvicorn backend.main:app --reload
 python -m uvicorn backend.main:app --reload
+
+# Очистите все
+docker-compose down -v
+docker system prune -f
+
+# Пересоберите с новыми зависимостями
+docker-compose build --no-cache backend
+
+# Запустите
+docker-compose up -d
+
+# Проверьте логи
+docker-compose logs -f backend
+
+# Проверьте работу
+curl http://localhost:8000/
+curl http://localhost:8000/health
+curl http://localhost:8000/test/redis
+curl http://localhost:8000/test/database
+
+# Перезапуск 
+ ПЕРЕЗАПУСК:
+docker-compose down
+docker-compose build backend
+docker-compose up -d
+docker-compose logs backend --tail=50
+docker-compose logs -f backend
+
+ # в режиме разработки с редис и постгрес в докере (venv + базы в Docker)
+ docker-compose up -d postgres redis
+ docker ps   -проверяем что запустилось
+venv\Scripts\activate
+
+переменные окружения 
+set DATABASE_URL=postgresql+psycopg2://admin:admin123@localhost:5432/account_registry
+set REDIS_URL=redis://localhost:6379/0
+set PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK=True
+
+ Проверить что переменные загрузились
+echo %DATABASE_URL%
+
+cd backend
+uvicorn main:app --reload
+cd C:\Users\1111111\Account_registry\frontend
+npm run dev

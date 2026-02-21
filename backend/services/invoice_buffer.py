@@ -2,8 +2,8 @@ import uuid
 import logging
 from datetime import datetime
 from sqlalchemy.orm import Session
-from backend.models import InvoiceLine
-from backend.utils.numbers import parse_number
+from models import InvoiceLine
+from utils.numbers import parse_number
 
 log = logging.getLogger(__name__)
 
