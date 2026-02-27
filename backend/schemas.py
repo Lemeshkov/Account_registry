@@ -1,7 +1,7 @@
 
 # backend/schemas.py
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, List
 from datetime import datetime
 
 class ImportedRequest(BaseModel):
@@ -72,3 +72,119 @@ class HistoryLogItem(BaseModel):
     model_config = {
     "from_attributes": True
 }
+
+# Схемы для дефектной ведомости
+class DefectSheetBase(BaseModel):
+    batch_id: str
+    file_name: str
+    status: str = "pending"
+    period_start: Optional[datetime] = None
+    period_end: Optional[datetime] = None
+
+class DefectSheetCreate(DefectSheetBase):
+    pass
+
+class DefectSheet(DefectSheetBase):
+    id: int
+    upload_date: datetime
+    created_at: datetime
+    
+    model_config = {
+        "from_attributes": True
+    }
+
+class DefectSheetItemBase(BaseModel):
+    position: int
+    address: Optional[str] = None
+    material_name: Optional[str] = None
+    requested_quantity: Optional[float] = None
+    requirement_number: Optional[str] = None
+    requirement_date: Optional[datetime] = None
+    car_brand: Optional[str] = None
+    license_plate: Optional[str] = None
+    recipient: Optional[str] = None
+
+class DefectSheetItemCreate(DefectSheetItemBase):
+    sheet_id: int
+
+class DefectSheetItem(DefectSheetItemBase):
+    id: int
+    sheet_id: int
+    profile_type: Optional[str] = None
+    profile_params: Optional[dict] = None
+    weight_tons: Optional[float] = None
+    calculated_meters: Optional[float] = None
+    formula_used: Optional[str] = None
+    is_calculated: bool = False
+    selected_for_calculation: bool = False
+    calculated_at: Optional[datetime] = None
+    
+    model_config = {
+        "from_attributes": True
+    }
+
+# Для предпросмотра после загрузки
+class DefectSheetPreview(BaseModel):
+    sheet_id: int
+    batch_id: str
+    file_name: str
+    total_items: int
+    items: List[DefectSheetItem]
+
+# Добавьте в schemas.py
+
+class DefectSheetBase(BaseModel):
+    """Базовая схема дефектной ведомости"""
+    file_name: str
+    batch_id: str
+    period_start: Optional[datetime] = None
+    period_end: Optional[datetime] = None
+    status: str = "pending"
+
+class DefectSheet(DefectSheetBase):
+    """Полная схема дефектной ведомости"""
+    id: int
+    upload_date: datetime
+    created_at: datetime
+    
+    model_config = {
+        "from_attributes": True
+    }
+
+class DefectSheetPreviewResponse(BaseModel):
+    """Ответ для предпросмотра после загрузки"""
+    sheet_id: int
+    batch_id: str
+    file_name: str
+    upload_date: datetime
+    status: str
+    period_start: Optional[datetime] = None
+    period_end: Optional[datetime] = None
+    total_items: int
+    items: List[DefectSheetItem]  # используем существующую схему DefectSheetItem
+    
+    model_config = {
+        "from_attributes": True
+    }    
+
+# Для запроса на пересчет
+class CalculationRequest(BaseModel):
+    sheet_id: int
+    item_ids: List[int]  # если пусто - пересчитать все
+    profile_type: str  # тип профиля для пересчета
+    profile_params: dict  # параметры профиля
+
+# Для результата пересчета
+class CalculationResult(BaseModel):
+    item_id: int
+    original_weight: float
+    calculated_meters: float
+    formula_used: str
+    success: bool
+    error: Optional[str] = None
+
+# Для экспорта
+class ExportRequest(BaseModel):
+    sheet_id: int
+    format: str = "excel"  # только excel пока
+    include_calculated: bool = True

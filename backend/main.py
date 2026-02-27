@@ -19,10 +19,11 @@ import logging
 from collections import defaultdict
 from pydantic import BaseModel
 from typing import List, Dict, Any
+from datetime import datetime 
 
 # Исправляем импорты - убираем точки
 from database import get_db, engine, SessionLocal
-from models import Base, PaymentRegistry, InvoiceLine
+from models import Base, PaymentRegistry, InvoiceLine, DefectSheet, DefectSheetItem 
 from parsers.excel_parser import ExcelParser
 from parsers.invoice_parser import parse_invoice_from_pdf
 from crud import (
@@ -45,6 +46,27 @@ from services.invoice_buffer import (
     mark_invoice_line_used,
     get_invoice,
 )
+# Новые импорты для дефектной ведомости
+from parsers.defect_parser import parse_defect_sheet
+from services.metal_calculator import metal_calculator, ProfileType
+from crud import (
+    create_defect_sheet,
+    create_defect_sheet_items,
+    get_defect_sheet,
+    get_defect_sheet_by_batch,
+    get_defect_sheet_items,
+    update_defect_sheet_status,
+    update_defect_sheet_item_calculation,
+    mark_items_for_calculation,
+    delete_defect_sheet,
+    create_defect_sheet,
+)
+from sqlalchemy.orm import Session
+from database import get_db
+from typing import List, Optional
+import uuid
+from pathlib import Path
+import shutil
 
 log = logging.getLogger(__name__)
 # WebSocket Manager импорт
@@ -88,6 +110,67 @@ class ApplyAllLinesRequest(BaseModel):
     registry_id: int
     batch_id: str    
 
+
+# Модели для дефектной ведомости
+class DefectSheetResponse(BaseModel):
+    id: int
+    batch_id: str
+    file_name: str
+    upload_date: datetime
+    status: str
+    total_items: int = 0
+    
+    model_config = {
+        "from_attributes": True
+    }
+
+class DefectSheetItemResponse(BaseModel):
+    id: int
+    position: Optional[int]
+    address: Optional[str]
+    material_name: Optional[str]
+    requested_quantity: Optional[float]
+    weight_tons: Optional[float]
+    profile_type: Optional[str]
+    profile_params: Optional[Dict]
+    calculated_meters: Optional[float]
+    formula_used: Optional[str]
+    is_calculated: bool
+    selected_for_calculation: bool
+    
+    model_config = {
+        "from_attributes": True
+    }
+
+class DefectSheetPreviewResponse(BaseModel):
+    sheet_id: int
+    batch_id: str
+    file_name: str
+    upload_date: datetime
+    status: str
+    period_start: Optional[datetime]
+    period_end: Optional[datetime]
+    total_items: int
+    items: List[DefectSheetItemResponse]
+
+class CalculationRequest(BaseModel):
+    sheet_id: int
+    item_ids: Optional[List[int]] = None  # если None - пересчитать все непосчитанные
+    profile_type: str = "pipe"  # по умолчанию труба
+    profile_params: Dict[str, Any] = {}
+
+class CalculationResponse(BaseModel):
+    sheet_id: int
+    total_items: int
+    calculated_items: int
+    results: List[Dict[str, Any]]
+
+class ExportRequest(BaseModel):
+    sheet_id: int
+    format: str = "excel"
+
+
+
 @app.on_event("startup")
 async def startup_event():
     """Действия при запуске приложения"""
@@ -104,6 +187,10 @@ app.add_middleware(
 
 BASE_UPLOAD_DIR = Path("uploads")
 BASE_UPLOAD_DIR.mkdir(exist_ok=True)
+
+# Директория для дефектных ведомостей
+DEFECT_UPLOAD_DIR = Path("uploads/defect_sheets")
+DEFECT_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 app.mount("/uploads", StaticFiles(directory=BASE_UPLOAD_DIR), name="uploads")
 
@@ -1191,6 +1278,410 @@ def apply_all_invoice_lines(payload: ApplyAllLinesRequest, db: Session = Depends
         "lines_applied": applied_lines,
         "registry_id": registry.id
     }
+
+
+# -------------------------------------------------------------------
+# DEFECT SHEET MODULE (Дефектная ведомость)
+# -------------------------------------------------------------------
+
+UPLOAD_DIR = Path("uploads/defect_sheets")
+UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+
+
+@app.post("/api/defect/upload", summary="Загрузить дефектную ведомость (Excel)")
+async def upload_defect_sheet(
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(...),
+    batch_id: Optional[str] = Form(None),
+    db: Session = Depends(get_db)
+):
+    """
+    Загружает Excel файл дефектной ведомости.
+    Возвращает batch_id для дальнейшей работы.
+    """
+    # Проверка расширения
+    ext = file.filename.split(".")[-1].lower()
+    if ext not in ("xlsx", "xls"):
+        raise HTTPException(400, "Поддерживаются только Excel файлы (.xlsx, .xls)")
+    
+    # Генерируем batch_id если не передан
+    if not batch_id:
+        batch_id = str(uuid.uuid4())
+    
+    # Сохраняем файл
+    file_path = UPLOAD_DIR / f"{batch_id}_{file.filename}"
+    with open(file_path, "wb") as f:
+        shutil.copyfileobj(file.file, f)
+    
+    # Запускаем фоновую задачу парсинга
+    background_tasks.add_task(
+        process_defect_sheet_background,
+        file_path,
+        batch_id,
+        file.filename
+    )
+    
+    # Сразу создаем запись в БД со статусом processing
+    sheet = create_defect_sheet(db, file.filename, batch_id)
+    db.commit()
+    
+    # Уведомляем через WebSocket о начале обработки
+    await websocket_manager.broadcast_to_batch(batch_id, {
+        "type": "defect_sheet_processing",
+        "batch_id": batch_id,
+        "sheet_id": sheet.id,
+        "status": "processing",
+        "message": "Файл принят, начинаем парсинг"
+    })
+    
+    return {
+        "message": "Файл принят в обработку",
+        "batch_id": batch_id,
+        "sheet_id": sheet.id,
+        "status": "processing"
+    }
+
+
+def process_defect_sheet_background(file_path: Path, batch_id: str, original_filename: str):
+    """Фоновая задача для парсинга дефектной ведомости"""
+    from crud import create_defect_sheet, create_defect_sheet_items, get_defect_sheet_by_batch
+    from datetime import datetime
+    
+    db = SessionLocal()
+    sheet = None
+    items = []
+    metadata = {}
+    
+    try:
+        log.info(f"[DEFECT] Starting parsing of {file_path.name}")
+        
+        # Обновляем статус через WebSocket
+        asyncio.run(websocket_manager.broadcast_to_batch(batch_id, {
+            "type": "defect_sheet_status",
+            "batch_id": batch_id,
+            "status": "parsing",
+            "progress": 30
+        }))
+        
+        # Парсим файл с обработкой ошибок
+        try:
+            items, metadata = parse_defect_sheet(file_path)
+            log.info(f"[DEFECT] Parsed {len(items)} items")
+        except Exception as parse_error:
+            log.exception(f"[DEFECT] Parse error: {parse_error}")
+            items = []
+            metadata = {"error": str(parse_error)}
+        
+        # Находим запись в БД или создаем новую
+        sheet = get_defect_sheet_by_batch(db, batch_id)
+        if not sheet:
+            log.info(f"[DEFECT] Sheet not found for batch {batch_id}, creating new one")
+            sheet = create_defect_sheet(db, batch_id, original_filename)
+            log.info(f"[DEFECT] Created new sheet with id {sheet.id}")
+        
+        # Обновляем метаданные
+        if metadata.get("period_start"):
+            sheet.period_start = metadata["period_start"]
+        if metadata.get("period_end"):
+            sheet.period_end = metadata["period_end"]
+        
+        # Сохраняем строки (если есть)
+        if items:
+            try:
+                create_defect_sheet_items(db, sheet.id, items)
+                log.info(f"[DEFECT] Saved {len(items)} items to DB")
+            except Exception as db_error:
+                log.exception(f"[DEFECT] DB save error: {db_error}")
+        
+        # Обновляем статус
+        sheet.status = "processed" if items else "no_data"
+        sheet.total_items = len(items)
+        db.commit()
+        
+        # Уведомляем об успешном завершении
+        asyncio.run(websocket_manager.broadcast_to_batch(batch_id, {
+            "type": "defect_sheet_processed",
+            "batch_id": batch_id,
+            "sheet_id": sheet.id,
+            "status": "processed",
+            "total_items": len(items),
+            "metadata": metadata,
+            "progress": 100
+        }))
+        
+        log.info(f"[DEFECT] Successfully processed {file_path.name}")
+        
+    except Exception as e:
+        log.exception(f"[DEFECT] Error processing {file_path.name}: {e}")
+        
+        # Обновляем статус на ошибку (только если sheet существует)
+        if sheet:
+            sheet.status = "error"
+            db.commit()
+        
+        # Уведомляем об ошибке
+        try:
+            asyncio.run(websocket_manager.broadcast_to_batch(batch_id, {
+                "type": "defect_sheet_error",
+                "batch_id": batch_id,
+                "status": "error",
+                "error": str(e)
+            }))
+        except:
+            pass
+    finally:
+        db.close()
+
+
+@app.get("/api/defect/{batch_id}/preview", response_model=DefectSheetPreviewResponse)
+def preview_defect_sheet(batch_id: str, db: Session = Depends(get_db)):
+    """
+    Получить предпросмотр дефектной ведомости.
+    Возвращает все распарсенные строки.
+    """
+    sheet = get_defect_sheet_by_batch(db, batch_id)
+    if not sheet:
+        raise HTTPException(404, f"Дефектная ведомость с batch_id {batch_id} не найдена")
+    
+    items = get_defect_sheet_items(db, sheet.id)
+    
+    return {
+        "sheet_id": sheet.id,
+        "batch_id": sheet.batch_id,
+        "file_name": sheet.file_name,
+        "upload_date": sheet.upload_date,
+        "status": sheet.status,
+        "period_start": sheet.period_start,
+        "period_end": sheet.period_end,
+        "total_items": len(items),
+        "items": items
+    }
+
+
+@app.get("/api/defect/{sheet_id}/items")
+def get_defect_items(sheet_id: int, db: Session = Depends(get_db)):
+    """Получить все строки дефектной ведомости по ID"""
+    items = get_defect_sheet_items(db, sheet_id)
+    return {"items": items, "total": len(items)}
+
+
+@app.post("/api/defect/calculate")
+def calculate_defect_items(
+    request: CalculationRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    Пересчет выбранных строк из тонн в метры.
+    Если item_ids не указан или пуст - пересчитываются все непосчитанные.
+    """
+    sheet = get_defect_sheet(db, request.sheet_id)
+    if not sheet:
+        raise HTTPException(404, "Дефектная ведомость не найдена")
+    
+    # Получаем все строки
+    all_items = get_defect_sheet_items(db, request.sheet_id)
+    
+    # Фильтруем строки для пересчета
+    items_to_calc = []
+    if request.item_ids:
+        items_to_calc = [item for item in all_items if item.id in request.item_ids]
+    else:
+        items_to_calc = [item for item in all_items if not item.is_calculated]
+    
+    if not items_to_calc:
+        return {
+            "sheet_id": request.sheet_id,
+            "total_items": len(all_items),
+            "calculated_items": 0,
+            "results": []
+        }
+    
+    # Подготавливаем данные для калькулятора
+    calc_items = []
+    for item in items_to_calc:
+        # Используем вес из строки или запрошенное количество
+        weight = item.weight_tons or item.requested_quantity
+        if not weight:
+            continue
+        
+        # Определяем параметры профиля
+        profile_params = request.profile_params.copy()
+        if item.profile_params:
+            profile_params.update(item.profile_params)
+        
+        calc_items.append({
+            "id": item.id,
+            "weight_tons": float(weight),
+            "profile_type": request.profile_type,
+            "profile_params": profile_params
+        })
+    
+    # Пакетный пересчет
+    results = metal_calculator.calculate_batch(
+        items=calc_items,
+        default_profile_type=request.profile_type,
+        default_params=request.profile_params
+    )
+    
+    # Сохраняем результаты в БД
+    calculated_count = 0
+    for result in results:
+        if result.get("calculated_meters") and not result.get("error"):
+            update_defect_sheet_item_calculation(
+                db,
+                result["id"],
+                result["calculated_meters"],
+                result["formula_used"]
+            )
+            calculated_count += 1
+    
+    # Обновляем статус ведомости
+    if calculated_count > 0:
+        all_calculated = all(item.is_calculated for item in all_items)
+        sheet.status = "calculated" if all_calculated else "partially_calculated"
+    
+    db.commit()
+    
+    # Уведомляем через WebSocket
+    asyncio.run(websocket_manager.broadcast_to_batch(sheet.batch_id, {
+        "type": "defect_calculation_complete",
+        "sheet_id": sheet.id,
+        "batch_id": sheet.batch_id,
+        "calculated_items": calculated_count,
+        "total_items": len(all_items)
+    }))
+    
+    return {
+        "sheet_id": request.sheet_id,
+        "total_items": len(all_items),
+        "calculated_items": calculated_count,
+        "results": results
+    }
+
+
+@app.get("/api/defect/formulas")
+def get_calculation_formulas():
+    """Получить список доступных формул для пересчета"""
+    formulas = []
+    for profile_type, info in metal_calculator.formulas.items():
+        formulas.append({
+            "type": profile_type,
+            "name": info["name"],
+            "formula": info["formula"],
+            "description": info["description"],
+            "params": info["params"]
+        })
+    return {"formulas": formulas}
+
+
+@app.post("/api/defect/save")
+def save_defect_sheet(
+    sheet_id: int,
+    db: Session = Depends(get_db)
+):
+    """
+    Сохранить результаты пересчета (финализировать ведомость)
+    """
+    sheet = get_defect_sheet(db, sheet_id)
+    if not sheet:
+        raise HTTPException(404, "Дефектная ведомость не найдена")
+    
+    # Проверяем, что все строки обработаны
+    items = get_defect_sheet_items(db, sheet_id)
+    uncounted = [item for item in items if not item.is_calculated and item.weight_tons]
+    
+    if uncounted and sheet.status != "partially_calculated":
+        return {
+            "warning": f"Есть непересчитанные строки ({len(uncounted)}). Сохранить как есть?",
+            "can_save": True
+        }
+    
+    sheet.status = "exported"
+    db.commit()
+    
+    # Уведомление
+    asyncio.run(websocket_manager.broadcast_to_batch(sheet.batch_id, {
+        "type": "defect_sheet_saved",
+        "sheet_id": sheet.id,
+        "batch_id": sheet.batch_id
+    }))
+    
+    return {
+        "status": "saved",
+        "sheet_id": sheet_id,
+        "message": "Дефектная ведомость сохранена"
+    }
+
+
+@app.post("/api/defect/export")
+async def export_defect_sheet(
+    request: ExportRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    Экспорт дефектной ведомости в Excel с результатами пересчета
+    """
+    sheet = get_defect_sheet(db, request.sheet_id)
+    if not sheet:
+        raise HTTPException(404, "Дефектная ведомость не найдена")
+    
+    items = get_defect_sheet_items(db, request.sheet_id)
+    
+    # Создаем Excel файл с результатами
+    import pandas as pd
+    from io import BytesIO
+    from fastapi.responses import StreamingResponse
+    
+    # Подготавливаем данные для экспорта
+    data = []
+    for item in items:
+        data.append({
+            "№ п/п": item.position,
+            "Марка (Адрес)": item.address,
+            "Наименование материала": item.material_name,
+            "Затреб (тонн)": float(item.requested_quantity) if item.requested_quantity else None,
+            "Вес (тонн)": float(item.weight_tons) if item.weight_tons else None,
+            "Тип профиля": item.profile_type,
+            "Параметры": str(item.profile_params) if item.profile_params else "",
+            "Пересчитано (метров)": float(item.calculated_meters) if item.calculated_meters else None,
+            "Формула": item.formula_used,
+            "Статус": "✓" if item.is_calculated else ""
+        })
+    
+    df = pd.DataFrame(data)
+    
+    # Создаем буфер для Excel
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        df.to_excel(writer, sheet_name='Дефектная ведомость', index=False)
+    
+    output.seek(0)
+    
+    filename = f"defect_sheet_{sheet.batch_id}_{datetime.now().strftime('%Y%m%d')}.xlsx"
+    
+    return StreamingResponse(
+        output,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename={filename}"}
+    )
+
+
+@app.delete("/api/defect/{sheet_id}")
+def delete_defect_sheet_endpoint(
+    sheet_id: int,
+    db: Session = Depends(get_db)
+):
+    """Удалить дефектную ведомость"""
+    sheet = get_defect_sheet(db, sheet_id)
+    if not sheet:
+        raise HTTPException(404, "Дефектная ведомость не найдена")
+    
+    batch_id = sheet.batch_id
+    delete_defect_sheet(db, sheet_id)
+    db.commit()
+    
+    return {"status": "deleted", "batch_id": batch_id}
+
 
 # -------------------------------------------------------------------
 # WEB SOCKET SUPPORT

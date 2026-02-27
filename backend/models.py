@@ -9,8 +9,9 @@ from sqlalchemy import (
     ForeignKey,
     JSON,
     Numeric,
-    UniqueConstraint,
+    UniqueConstraint,  
 )
+from sqlalchemy.orm import relationship 
 from sqlalchemy.sql import func
 from database import Base
 
@@ -146,3 +147,62 @@ class InvoiceLine(Base):
             name="uq_invoice_line_invoice_line_no",
         ),
     )
+
+    # -------------------------------------------------------------------
+# DEFECT SHEET (Дефектная ведомость)
+# -------------------------------------------------------------------
+
+class DefectSheet(Base):
+    __tablename__ = "defect_sheets"
+
+    id = Column(Integer, primary_key=True, index=True)
+    batch_id = Column(String, index=True, nullable=False)  # для группировки загрузок
+    file_name = Column(String, nullable=False)
+    upload_date = Column(DateTime(timezone=True), server_default=func.now())
+    status = Column(String, default="pending")  # pending, processed, calculated, exported
+    
+    # Метаданные из шапки документа
+    period_start = Column(DateTime, nullable=True)
+    period_end = Column(DateTime, nullable=True)
+    
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class DefectSheetItem(Base):
+    __tablename__ = "defect_sheet_items"
+    __table_args__ = (
+        UniqueConstraint("sheet_id", "position", name="uq_defect_sheet_position"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    sheet_id = Column(Integer, ForeignKey("defect_sheets.id", ondelete="CASCADE"), nullable=False)
+    
+    # Позиция в исходном документе
+    position = Column(Integer, nullable=False)
+    
+    # Данные из Excel (маппинг согласно ТЗ)
+    address = Column(String, nullable=True)  # из поля "Марка"
+    material_name = Column(String, nullable=True)  # из поля "Наименование зап.части"
+    requested_quantity = Column(Numeric(12, 3), nullable=True)  # из поля "Затреб" (в тоннах)
+    
+    # Дополнительные поля для контекста
+    requirement_number = Column(String, nullable=True)  # номер требования
+    requirement_date = Column(DateTime, nullable=True)
+    car_brand = Column(String, nullable=True)
+    license_plate = Column(String, nullable=True)
+    recipient = Column(String, nullable=True)  # получатель
+    
+    # Поля для калькулятора металлопроката
+    profile_type = Column(String, nullable=True)  # тип профиля (труба, и т.д.)
+    profile_params = Column(JSON, nullable=True)  # параметры профиля {d: 100, t: 5} для трубы
+    weight_tons = Column(Numeric(12, 3), nullable=True)  # исходный вес в тоннах (дублирует requested_quantity для ясности)
+    calculated_meters = Column(Numeric(12, 2), nullable=True)  # пересчитанные метры
+    formula_used = Column(String, nullable=True)  # использованная формула
+    is_calculated = Column(Boolean, default=False)
+    
+    # Статус
+    selected_for_calculation = Column(Boolean, default=False)  # выбрана для пересчета
+    calculated_at = Column(DateTime(timezone=True), nullable=True)
+    
+    # Связи
+    sheet = relationship("DefectSheet", backref="items")

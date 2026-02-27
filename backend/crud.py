@@ -4,10 +4,11 @@
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 import models
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 from datetime import datetime
 import json
-import re                       
+import re  
+import uuid                     
 from utils.numbers import parse_number
 
 
@@ -307,3 +308,110 @@ def reorder_registry_batch(db: Session, batch_id: str, order_mapping: Dict[int, 
     
     return updated_count
 
+
+
+
+# -------------------------------------------------------------------
+# CRUD для дефектных ведомостей
+# -------------------------------------------------------------------
+
+def create_defect_sheet(db: Session, file_name: str, batch_id: Optional[str] = None) -> models.DefectSheet:
+    """Создать запись о дефектной ведомости"""
+    if not batch_id:
+        batch_id = str(uuid.uuid4())
+    
+    sheet = models.DefectSheet(
+        batch_id=batch_id,
+        file_name=file_name,
+        status="pending"
+    )
+    db.add(sheet)
+    db.flush()  # Чтобы получить id
+    return sheet
+
+def create_defect_sheet_items(db: Session, sheet_id: int, items: List[Dict]) -> List[models.DefectSheetItem]:
+    """Создать строки дефектной ведомости"""
+    created_items = []
+    
+    for item_data in items:
+        item = models.DefectSheetItem(
+            sheet_id=sheet_id,
+            position=item_data.get("position"),
+            address=item_data.get("address"),
+            material_name=item_data.get("material_name"),
+            requested_quantity=item_data.get("requested_quantity"),
+            requirement_number=item_data.get("requirement_number"),
+            requirement_date=item_data.get("requirement_date"),
+            car_brand=item_data.get("car_brand"),
+            license_plate=item_data.get("license_plate"),
+            recipient=item_data.get("recipient"),
+            weight_tons=item_data.get("weight_tons") or item_data.get("requested_quantity"),
+            profile_type=item_data.get("profile_type"),
+            profile_params=item_data.get("profile_params"),
+            is_calculated=False
+        )
+        db.add(item)
+        created_items.append(item)
+    
+    db.flush()
+    return created_items
+
+def get_defect_sheet(db: Session, sheet_id: int) -> Optional[models.DefectSheet]:
+    """Получить дефектную ведомость по ID"""
+    return db.query(models.DefectSheet).filter(models.DefectSheet.id == sheet_id).first()
+
+def get_defect_sheet_by_batch(db: Session, batch_id: str) -> Optional[models.DefectSheet]:
+    """Получить дефектную ведомость по batch_id"""
+    return db.query(models.DefectSheet).filter(models.DefectSheet.batch_id == batch_id).first()
+
+def get_defect_sheet_items(db: Session, sheet_id: int) -> List[models.DefectSheetItem]:
+    """Получить все строки дефектной ведомости"""
+    return db.query(models.DefectSheetItem).filter(
+        models.DefectSheetItem.sheet_id == sheet_id
+    ).order_by(models.DefectSheetItem.position).all()
+
+def update_defect_sheet_status(db: Session, sheet_id: int, status: str):
+    """Обновить статус ведомости"""
+    sheet = db.query(models.DefectSheet).filter(models.DefectSheet.id == sheet_id).first()
+    if sheet:
+        sheet.status = status
+        db.flush()
+
+def update_defect_sheet_item_calculation(
+    db: Session, 
+    item_id: int, 
+    calculated_meters: float,
+    formula_used: str
+):
+    """Обновить результат расчета для строки"""
+    item = db.query(models.DefectSheetItem).filter(models.DefectSheetItem.id == item_id).first()
+    if item:
+        item.calculated_meters = calculated_meters
+        item.formula_used = formula_used
+        item.is_calculated = True
+        item.calculated_at = func.now()
+        db.flush()
+
+def mark_items_for_calculation(db: Session, item_ids: List[int], selected: bool = True):
+    """Отметить строки для пересчета"""
+    db.query(models.DefectSheetItem).filter(
+        models.DefectSheetItem.id.in_(item_ids)
+    ).update({models.DefectSheetItem.selected_for_calculation: selected}, synchronize_session=False)
+    db.flush()
+
+def delete_defect_sheet(db: Session, sheet_id: int):
+    """Удалить ведомость (каскадно удалит и строки)"""
+    db.query(models.DefectSheet).filter(models.DefectSheet.id == sheet_id).delete()
+    db.flush()
+
+def create_defect_sheet(db: Session, batch_id: str, file_name: str) -> models.DefectSheet:
+    """Создает запись о дефектной ведомости"""
+    sheet = models.DefectSheet(
+        batch_id=batch_id,
+        file_name=file_name,
+        status="pending",
+        # uploaded_at=datetime.now()
+    )
+    db.add(sheet)
+    db.flush()
+    return sheet    

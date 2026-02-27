@@ -637,3 +637,34 @@ th {
   color: #52c41a;
   font-weight: bold;
 }
+
+/* Стили для навигации */
+nav {
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+  border-bottom: 1px solid #eee;
+  padding-bottom: 15px;
+}
+
+nav a {
+  transition: all 0.3s ease;
+}
+
+nav a:hover {
+  opacity: 0.8;
+  transform: translateY(-2px);
+}
+
+/* Адаптивность для мобильных */
+@media (max-width: 600px) {
+  nav {
+    flex-direction: column;
+    align-items: center;
+  }
+  
+  nav a {
+    width: 100%;
+    text-align: center;
+  }
+}

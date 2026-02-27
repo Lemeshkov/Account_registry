@@ -46,3 +46,10 @@ cd backend
 uvicorn main:app --reload
 cd C:\Users\1111111\Account_registry\frontend
 npm run dev
+
+
+# Подключитесь к PostgreSQL через Docker
+docker exec -it registry_postgres psql -U admin -d account_registry
+# (Внутри psql) Посмотрите, есть ли уже таблицы
+\dt
+\q
