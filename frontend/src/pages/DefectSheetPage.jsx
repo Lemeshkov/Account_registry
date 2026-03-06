@@ -1,297 +1,4 @@
-// import React, { useState, useEffect } from 'react';
-// import {
-//   Box,
-//   Button,
-//   Paper,
-//   Typography,
-//   Alert,
-//   Snackbar,
-//   LinearProgress,
-//   Chip,
-//   IconButton,
-//   Tooltip
-// } from '@mui/material';
-// import {
-//   CloudUpload as UploadIcon,
-//   Calculate as CalculateIcon,
-//   Save as SaveIcon,
-//   Download as DownloadIcon,
-//   Refresh as RefreshIcon
-// } from '@mui/icons-material';
-// import { DataGrid } from '@mui/x-data-grid';
-// import { useWebSocket } from '../hooks/useWebSocket';
-// import DefectSheetUploader from '../components/DefectSheetUploader';
-// import MetalCalculator from '../components/MetalCalculator';
-// import api from '../services/api';
-
-// const DefectSheetPage = () => {
-//   const [batchId, setBatchId] = useState(null);
-//   const [sheetId, setSheetId] = useState(null);
-//   const [items, setItems] = useState([]);
-//   const [loading, setLoading] = useState(false);
-//   const [processing, setProcessing] = useState(false);
-//   const [selectedItems, setSelectedItems] = useState([]);
-//   const [notification, setNotification] = useState({ open: false, message: '', severity: 'info' });
-//   const [formulas, setFormulas] = useState([]);
-
-//   const { lastMessage, connectionStatus } = useWebSocket(batchId);
-
-//   // Обработка WebSocket сообщений
-//   useEffect(() => {
-//     if (lastMessage) {
-//       const data = lastMessage;
-//       switch (data.type) {
-//         case 'defect_sheet_processed':
-//           setProcessing(false);
-//           loadSheetData(data.sheet_id);
-//           showNotification('Файл успешно обработан', 'success');
-//           break;
-//         case 'defect_calculation_complete':
-//           loadSheetData(data.sheet_id);
-//           showNotification(`Пересчитано ${data.calculated_items} строк`, 'success');
-//           break;
-//         case 'defect_sheet_error':
-//           setProcessing(false);
-//           showNotification(`Ошибка: ${data.error}`, 'error');
-//           break;
-//         default:
-//           break;
-//       }
-//     }
-//   }, [lastMessage]);
-
-//   // Загрузка данных ведомости
-//   const loadSheetData = async (id) => {
-//     if (!id && !sheetId) return;
-//     try {
-//       setLoading(true);
-//       const response = await api.get(`/api/defect/${id || sheetId}/items`);
-//       setItems(response.data.items || []);
-//     } catch (error) {
-//       showNotification('Ошибка загрузки данных', 'error');
-//     } finally {
-//       setLoading(false);
-//     }
-//   };
-
-//   // Загрузка формул
-//   const loadFormulas = async () => {
-//     try {
-//       const response = await api.get('/api/defect/formulas');
-//       setFormulas(response.data.formulas || []);
-//     } catch (error) {
-//       console.error('Error loading formulas:', error);
-//     }
-//   };
-
-//   useEffect(() => {
-//     loadFormulas();
-//   }, []);
-
-//   const showNotification = (message, severity = 'info') => {
-//     setNotification({ open: true, message, severity });
-//   };
-
-//   const handleUploadSuccess = (newBatchId, newSheetId) => {
-//     setBatchId(newBatchId);
-//     setSheetId(newSheetId);
-//     setProcessing(true);
-//     showNotification('Файл загружен, начинается обработка...', 'info');
-//   };
-
-//   const handleCalculate = async (profileType, profileParams) => {
-//     if (!sheetId || selectedItems.length === 0) {
-//       showNotification('Выберите строки для пересчета', 'warning');
-//       return;
-//     }
-
-//     try {
-//       setProcessing(true);
-//       await api.post('/api/defect/calculate', {
-//         sheet_id: sheetId,
-//         item_ids: selectedItems,
-//         profile_type: profileType,
-//         profile_params: profileParams
-//       });
-//     } catch (error) {
-//       showNotification('Ошибка при пересчете', 'error');
-//       setProcessing(false);
-//     }
-//   };
-
-//   const handleSave = async () => {
-//     try {
-//       await api.post('/api/defect/save', { sheet_id: sheetId });
-//       showNotification('Ведомость сохранена', 'success');
-//       loadSheetData();
-//     } catch (error) {
-//       showNotification('Ошибка при сохранении', 'error');
-//     }
-//   };
-
-//   const handleExport = async () => {
-//     try {
-//       const response = await api.post('/api/defect/export', { 
-//         sheet_id: sheetId,
-//         format: 'excel'
-//       }, { responseType: 'blob' });
-      
-//       const url = window.URL.createObjectURL(new Blob([response.data]));
-//       const link = document.createElement('a');
-//       link.href = url;
-//       link.setAttribute('download', `defect_sheet_${batchId}.xlsx`);
-//       document.body.appendChild(link);
-//       link.click();
-//       link.remove();
-//     } catch (error) {
-//       showNotification('Ошибка при экспорте', 'error');
-//     }
-//   };
-
-//   // Колонки для таблицы
-//   const columns = [
-//     { field: 'position', headerName: '№', width: 70 },
-//     { field: 'address', headerName: 'Адрес (Марка)', width: 200 },
-//     { field: 'material_name', headerName: 'Наименование материала', width: 300 },
-//     { field: 'requested_quantity', headerName: 'Затреб (тонн)', width: 120, type: 'number' },
-//     { field: 'weight_tons', headerName: 'Вес (тонн)', width: 120, type: 'number' },
-//     { 
-//       field: 'calculated_meters', 
-//       headerName: 'Пересчитано (метров)', 
-//       width: 150,
-//       type: 'number',
-//       renderCell: (params) => (
-//         <Box>
-//           {params.value ? (
-//             <Chip 
-//               label={params.value.toFixed(2)} 
-//               color="success" 
-//               size="small"
-//               variant="outlined"
-//             />
-//           ) : '-'}
-//         </Box>
-//       )
-//     },
-//     { field: 'profile_type', headerName: 'Тип', width: 100 },
-//     { 
-//       field: 'is_calculated', 
-//       headerName: 'Статус', 
-//       width: 100,
-//       renderCell: (params) => (
-//         <Chip 
-//           label={params.value ? '✓' : 'Ожидает'} 
-//           color={params.value ? 'success' : 'default'}
-//           size="small"
-//         />
-//       )
-//     }
-//   ];
-
-//   return (
-//     <Box sx={{ p: 3 }}>
-//       <Typography variant="h4" gutterBottom>
-//         Дефектная ведомость
-//         {connectionStatus && (
-//           <Chip 
-//             label="WebSocket подключен" 
-//             color="success" 
-//             size="small" 
-//             sx={{ ml: 2 }}
-//           />
-//         )}
-//       </Typography>
-
-//       {!batchId ? (
-//         <DefectSheetUploader onUploadSuccess={handleUploadSuccess} />
-//       ) : (
-//         <Box>
-//           <Paper sx={{ p: 2, mb: 2 }}>
-//             <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
-//               <Typography variant="subtitle1">
-//                 Batch ID: {batchId}
-//               </Typography>
-//               <Chip 
-//                 label={processing ? 'Обработка...' : 'Готово'} 
-//                 color={processing ? 'warning' : 'success'}
-//               />
-//               <Box sx={{ flexGrow: 1 }} />
-//               <Tooltip title="Обновить">
-//                 <IconButton onClick={() => loadSheetData()} disabled={loading}>
-//                   <RefreshIcon />
-//                 </IconButton>
-//               </Tooltip>
-//               <Button
-//                 variant="contained"
-//                 color="primary"
-//                 startIcon={<CalculateIcon />}
-//                 onClick={() => document.getElementById('calculator-dialog').showModal()}
-//                 disabled={selectedItems.length === 0 || processing}
-//               >
-//                 Пересчитать ({selectedItems.length})
-//               </Button>
-//               <Button
-//                 variant="outlined"
-//                 color="primary"
-//                 startIcon={<SaveIcon />}
-//                 onClick={handleSave}
-//                 disabled={processing}
-//               >
-//                 Сохранить
-//               </Button>
-//               <Button
-//                 variant="outlined"
-//                 color="secondary"
-//                 startIcon={<DownloadIcon />}
-//                 onClick={handleExport}
-//               >
-//                 Экспорт
-//               </Button>
-//             </Box>
-//           </Paper>
-
-//           {processing && <LinearProgress sx={{ mb: 2 }} />}
-
-//           <Paper sx={{ height: 600, width: '100%' }}>
-//             <DataGrid
-//               rows={items}
-//               columns={columns}
-//               pageSize={10}
-//               rowsPerPageOptions={[10, 25, 50]}
-//               checkboxSelection
-//               loading={loading}
-//               onSelectionModelChange={(newSelection) => setSelectedItems(newSelection)}
-//               selectionModel={selectedItems}
-//               getRowId={(row) => row.id}
-//               disableSelectionOnClick
-//             />
-//           </Paper>
-//         </Box>
-//       )}
-
-//       <MetalCalculator
-//         open={false} // Управляется через dialog
-//         formulas={formulas}
-//         onCalculate={handleCalculate}
-//         onClose={() => document.getElementById('calculator-dialog')?.close()}
-//       />
-
-//       <Snackbar
-//         open={notification.open}
-//         autoHideDuration={6000}
-//         onClose={() => setNotification({ ...notification, open: false })}
-//       >
-//         <Alert severity={notification.severity} onClose={() => setNotification({ ...notification, open: false })}>
-//           {notification.message}
-//         </Alert>
-//       </Snackbar>
-//     </Box>
-//   );
-// };
-
-// export default DefectSheetPage;
-
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect } from "react";
 import {
   Box,
   Button,
@@ -302,20 +9,152 @@ import {
   LinearProgress,
   Chip,
   IconButton,
-  Tooltip
-} from '@mui/material';
+  Tooltip,
+} from "@mui/material";
 import {
-  CloudUpload as UploadIcon,
   Calculate as CalculateIcon,
   Save as SaveIcon,
   Download as DownloadIcon,
-  Refresh as RefreshIcon
-} from '@mui/icons-material';
-import { DataGrid } from '@mui/x-data-grid';
-import { useWebSocket } from '../hooks/useWebSocket';
-import DefectSheetUploader from '../components/DefectSheetUploader';
-import MetalCalculator from '../components/MetalCalculator';
-import api from '../services/api';
+  Refresh as RefreshIcon,
+} from "@mui/icons-material";
+import { DataGrid, GridToolbar } from "@mui/x-data-grid";
+import { useWebSocket } from "../hooks/useWebSocket";
+import DefectSheetUploader from "../components/DefectSheetUploader";
+import MetalCalculatorModal from "../components/MetalCalculatorModal";
+import api from "../services/api";
+
+const PROFILE_TYPES = {
+  pipe: {
+    name: "Труба стальная",
+    icon: "🔴",
+    description: "ВГП, электросварная, профильная",
+    params: [
+      {
+        name: "d",
+        label: "Диаметр (мм)",
+        type: "number",
+        min: 10,
+        max: 500,
+        step: 1,
+        required: true,
+      },
+      {
+        name: "t",
+        label: "Толщина стенки (мм)",
+        type: "number",
+        min: 1,
+        max: 50,
+        step: 0.5,
+        required: true,
+      },
+    ],
+    formula: "({d} - {t}) * {t} * 0.02466",
+  },
+  rebar: {
+    name: "Арматура",
+    icon: "⚡",
+    description: "Стержневая арматура, катанка",
+    params: [
+      {
+        name: "d",
+        label: "Диаметр (мм)",
+        type: "number",
+        min: 6,
+        max: 40,
+        step: 1,
+        required: true,
+      },
+    ],
+    formula: "{d}^2 * 0.00617",
+  },
+  sheet: {
+    name: "Лист стальной",
+    icon: "📄",
+    description: "Г/к, х/к, оцинкованный",
+    params: [
+      {
+        name: "thickness",
+        label: "Толщина (мм)",
+        type: "number",
+        min: 0.5,
+        max: 100,
+        step: 0.1,
+        required: true,
+      },
+      {
+        name: "width",
+        label: "Ширина (м)",
+        type: "number",
+        min: 0.5,
+        max: 3,
+        step: 0.1,
+        required: true,
+      },
+      {
+        name: "length",
+        label: "Длина (м)",
+        type: "number",
+        min: 1,
+        max: 12,
+        step: 0.1,
+        required: true,
+      },
+    ],
+    formula: "{thickness} * {width} * {length} * 7.85",
+  },
+  angle: {
+    name: "Уголок",
+    icon: "📐",
+    description: "Равнополочный, неравнополочный",
+    params: [
+      {
+        name: "a",
+        label: "Полка A (мм)",
+        type: "number",
+        min: 20,
+        max: 250,
+        step: 1,
+        required: true,
+      },
+      {
+        name: "b",
+        label: "Полка B (мм)",
+        type: "number",
+        min: 20,
+        max: 250,
+        step: 1,
+        required: true,
+      },
+      {
+        name: "t",
+        label: "Толщина (мм)",
+        type: "number",
+        min: 3,
+        max: 30,
+        step: 0.5,
+        required: true,
+      },
+    ],
+    formula: "({a} + {b} - {t}) * {t} * 0.00785",
+  },
+  beam: {
+    name: "Балка двутавровая",
+    icon: "🏗️",
+    description: "Двутавр, швеллер",
+    params: [
+      {
+        name: "profile_number",
+        label: "Номер профиля",
+        type: "select",
+        options: [
+          10, 12, 14, 16, 18, 20, 22, 24, 27, 30, 36, 40, 45, 50, 55, 60,
+        ],
+        required: true,
+      },
+    ],
+    formula: "Справочник ГОСТ",
+  },
+};
 
 const DefectSheetPage = () => {
   const [batchId, setBatchId] = useState(null);
@@ -324,270 +163,344 @@ const DefectSheetPage = () => {
   const [loading, setLoading] = useState(false);
   const [processing, setProcessing] = useState(false);
   const [selectedItems, setSelectedItems] = useState([]);
-  const [notification, setNotification] = useState({ open: false, message: '', severity: 'info' });
-  const [formulas, setFormulas] = useState([]);
+  const [notification, setNotification] = useState({
+    open: false,
+    message: "",
+    severity: "info",
+  });
   const [calculatorOpen, setCalculatorOpen] = useState(false);
+  const [paginationModel, setPaginationModel] = useState({
+    pageSize: 10,
+    page: 0,
+  });
 
   const { lastMessage, connectionStatus } = useWebSocket(batchId);
 
-  // Обработка WebSocket сообщений
+  // ========== ЗАГРУЗКА ДАННЫХ ==========
+  const loadSheetData = async (id) => {
+    const targetId = id;
+    if (!targetId) {
+      console.log("❌ No sheet ID provided");
+      return;
+    }
+
+    try {
+      setLoading(true);
+      console.log(`📥 Loading data for sheet: ${targetId}`);
+
+      const data = await api.get(`/api/defect/${targetId}/items`);
+      console.log("📦 Received data:", data);
+
+      if (data && data.items && Array.isArray(data.items)) {
+        console.log(`✅ Setting ${data.items.length} items`);
+        const itemsWithNumericIds = data.items.map(item => ({
+          ...item,
+          id: Number(item.id)
+        }));
+        console.log("📦 Items with numeric IDs:", itemsWithNumericIds);
+        setItems(itemsWithNumericIds);
+        setSelectedItems([]);
+      } else if (Array.isArray(data)) {
+        const itemsWithNumericIds = data.map(item => ({
+          ...item,
+          id: Number(item.id)
+        }));
+        console.log(`✅ Setting ${itemsWithNumericIds.length} items from array`);
+        setItems(itemsWithNumericIds);
+        setSelectedItems([]);
+      } else {
+        console.warn("⚠️ Unexpected data structure:", data);
+        setItems([]);
+        showNotification("Получены данные в неожиданном формате", "warning");
+      }
+    } catch (error) {
+      console.error("❌ Error loading sheet data:", error);
+      showNotification(`Ошибка загрузки данных: ${error.message}`, "error");
+      setItems([]);
+    } finally {
+      setLoading(false);
+      setProcessing(false);
+    }
+  };
+
+  // ========== ЗАГРУЗКА ПРИ ИЗМЕНЕНИИ sheetId ==========
+  useEffect(() => {
+    if (sheetId) {
+      console.log("🆔 sheetId changed to:", sheetId);
+      loadSheetData(sheetId);
+    }
+  }, [sheetId]);
+
+  // ========== WEBSOCKET ОБРАБОТЧИК ==========
   useEffect(() => {
     if (lastMessage) {
-      console.log('WebSocket message received:', lastMessage);
+      console.log("WebSocket message received:", lastMessage);
       const data = lastMessage;
+
       switch (data.type) {
-        case 'defect_sheet_processed':
-          console.log('Sheet processed, loading data for sheet_id:', data.sheet_id);
+        case "defect_sheet_processed":
+          console.log("✅ Sheet processed, new sheet_id:", data.sheet_id);
+          setProcessing(false);
+          if (data.sheet_id) {
+            setSheetId(data.sheet_id);
+          }
+          showNotification(
+            `Файл обработан: ${data.total_items || 0} строк`,
+            "success",
+          );
+          break;
+
+        case "defect_calculation_complete":
+          console.log("✅ Calculation complete, reloading data");
           setProcessing(false);
           if (data.sheet_id) {
             loadSheetData(data.sheet_id);
           }
-          showNotification('Файл успешно обработан', 'success');
+          showNotification(
+            `Пересчитано ${data.calculated_items || 0} строк`,
+            "success",
+          );
           break;
-        case 'defect_calculation_complete':
-          console.log('Calculation complete, reloading data');
-          if (data.sheet_id) {
-            loadSheetData(data.sheet_id);
-          }
-          showNotification(`Пересчитано ${data.calculated_items || 0} строк`, 'success');
+
+        case "defect_calculation_progress":
+          console.log(`⏳ Calculation progress: ${data.progress}%`);
           break;
-        case 'defect_sheet_error':
+
+        case "defect_sheet_error":
+          console.error("❌ Sheet error:", data.error);
           setProcessing(false);
-          showNotification(`Ошибка: ${data.error}`, 'error');
+          showNotification(`Ошибка: ${data.error}`, "error");
           break;
+
         default:
-          console.log('Unknown message type:', data.type);
+          console.log("Unknown message type:", data.type);
           break;
       }
     }
   }, [lastMessage]);
 
-  // Загрузка данных ведомости
- // Загрузка данных ведомости
-const loadSheetData = async (id) => {
-  const targetId = id || sheetId;
-  if (!targetId) {
-    console.log('No sheet ID available');
-    return;
-  }
-  
-  try {
-    setLoading(true);
-    console.log('📥 Loading data for sheet:', targetId);
-    
-    // api.get() уже возвращает данные, а не response!
-    const data = await api.get(`/api/defect/${targetId}/items`);
-    console.log('📦 Received data:', data);
-    
-    // Проверяем структуру данных
-    if (data && data.items && Array.isArray(data.items)) {
-      console.log(`✅ Setting ${data.items.length} items from data.items`);
-      setItems(data.items);
-    } else if (Array.isArray(data)) {
-      console.log(`✅ Setting ${data.length} items from array`);
-      setItems(data);
-    } else {
-      console.warn('⚠️ Unexpected data structure:', data);
-      setItems([]);
-    }
-  } catch (error) {
-    console.error('❌ Error loading sheet data:', error);
-    showNotification(`Ошибка загрузки данных: ${error.message}`, 'error');
-  } finally {
-    setLoading(false);
-  }
-};
-
-  // const loadSheetData = async (id) => {
-  //   const targetId = id || sheetId;
-  //   if (!targetId) {
-  //     console.log('No sheet ID available');
-  //     return;
-  //   }
-    
-  //   try {
-  //     setLoading(true);
-  //     console.log('Loading data for sheet:', targetId);
-  //     const response = await api.get(`/api/defect/${targetId}/items`);
-  //     console.log('Load response:', response.data);
-      
-  //     // Проверяем структуру ответа
-  //     if (response.data && response.data.items) {
-  //       console.log(`Setting ${response.data.items.length} items from response.data.items`);
-  //       setItems(response.data.items);
-  //     } else if (Array.isArray(response.data)) {
-  //       console.log(`Setting ${response.data.length} items from array response`);
-  //       setItems(response.data);
-  //     } else {
-  //       console.warn('Unexpected response structure:', response.data);
-  //       setItems([]);
-  //     }
-  //   } catch (error) {
-  //     console.error('Error loading sheet data:', error);
-  //     showNotification('Ошибка загрузки данных', 'error');
-  //   } finally {
-  //     setLoading(false);
-  //   }
-  // };
-
-  // Загрузка формул
-  const loadFormulas = async () => {
-    try {
-      console.log('Loading formulas...');
-      const response = await api.get('/api/defect/formulas');
-      console.log('Formulas response:', response.data);
-      
-      if (response.data && response.data.formulas) {
-        console.log(`Setting ${response.data.formulas.length} formulas from response.data.formulas`);
-        setFormulas(response.data.formulas);
-      } else if (Array.isArray(response.data)) {
-        console.log(`Setting ${response.data.length} formulas from array`);
-        setFormulas(response.data);
-      } else {
-        console.warn('Unexpected formulas response:', response.data);
-        setFormulas([]);
-      }
-    } catch (error) {
-      console.error('Error loading formulas:', error);
-      showNotification('Ошибка загрузки формул', 'error');
-    }
-  };
-
-  useEffect(() => {
-    loadFormulas();
-  }, []);
-
-  const showNotification = (message, severity = 'info') => {
+  const showNotification = (message, severity = "info") => {
     setNotification({ open: true, message, severity });
   };
 
   const handleUploadSuccess = (newBatchId, newSheetId) => {
-    console.log('Upload success:', { newBatchId, newSheetId });
+    console.log("📤 Upload success:", { newBatchId, newSheetId });
     setBatchId(newBatchId);
-    setSheetId(newSheetId);
     setProcessing(true);
-    showNotification('Файл загружен, начинается обработка...', 'info');
-    
-    // Пробуем загрузить данные сразу (на случай если они уже есть)
-    setTimeout(() => {
-      if (newSheetId) {
-        console.log('Attempting immediate load for sheet:', newSheetId);
-        loadSheetData(newSheetId);
-      }
-    }, 2000);
+    showNotification("Файл загружен, начинается обработка...", "info");
   };
 
-  const handleCalculate = async (profileType, profileParams) => {
+  const handleCalculate = async (
+    profileType,
+    profileParams,
+    applyToAll = true,
+  ) => {
     if (!sheetId || selectedItems.length === 0) {
-      showNotification('Выберите строки для пересчета', 'warning');
+      showNotification("Выберите строки для пересчета", "warning");
       return;
     }
 
     try {
       setProcessing(true);
-      console.log('Calculating:', { sheetId, selectedItems, profileType, profileParams });
-      await api.post('/api/defect/calculate', {
+      console.log("🧮 Calculating:", {
+        sheetId,
+        selectedItems,
+        profileType,
+        profileParams,
+        applyToAll,
+      });
+
+      await api.post("/api/defect/calculate", {
         sheet_id: sheetId,
         item_ids: selectedItems,
         profile_type: profileType,
-        profile_params: profileParams
+        profile_params: profileParams,
       });
-      // Не убираем processing - ждем WebSocket
     } catch (error) {
-      console.error('Calculation error:', error);
-      showNotification('Ошибка при пересчете', 'error');
+      console.error("❌ Calculation error:", error);
+      showNotification("Ошибка при пересчете", "error");
       setProcessing(false);
     }
   };
 
   const handleSave = async () => {
     try {
-      console.log('Saving sheet:', sheetId);
-      await api.post('/api/defect/save', { sheet_id: sheetId });
-      showNotification('Ведомость сохранена', 'success');
-      loadSheetData();
+      console.log("💾 Saving sheet:", sheetId);
+      await api.post("/api/defect/save", { sheet_id: sheetId });
+      showNotification("Ведомость сохранена", "success");
+      loadSheetData(sheetId);
     } catch (error) {
-      console.error('Save error:', error);
-      showNotification('Ошибка при сохранении', 'error');
+      console.error("❌ Save error:", error);
+      showNotification("Ошибка при сохранении", "error");
     }
   };
 
   const handleExport = async () => {
     try {
-      console.log('Exporting sheet:', sheetId);
-      const response = await api.post('/api/defect/export', { 
-        sheet_id: sheetId,
-        format: 'excel'
-      }, { responseType: 'blob' });
-      
+      console.log("📥 Exporting sheet:", sheetId);
+      const response = await api.post(
+        "/api/defect/export",
+        {
+          sheet_id: sheetId,
+          format: "excel",
+        },
+        { responseType: "blob" },
+      );
+
       const url = window.URL.createObjectURL(new Blob([response.data]));
-      const link = document.createElement('a');
+      const link = document.createElement("a");
       link.href = url;
-      link.setAttribute('download', `defect_sheet_${batchId}.xlsx`);
+      link.setAttribute("download", `defect_sheet_${batchId}.xlsx`);
       document.body.appendChild(link);
       link.click();
       link.remove();
-      showNotification('Файл экспортирован', 'success');
+      showNotification("Файл экспортирован", "success");
     } catch (error) {
-      console.error('Export error:', error);
-      showNotification('Ошибка при экспорте', 'error');
+      console.error("❌ Export error:", error);
+      showNotification("Ошибка при экспорте", "error");
     }
   };
 
   const handleRefresh = () => {
-    console.log('Manual refresh');
-    loadSheetData();
+    console.log("🔄 Manual refresh");
+    if (sheetId) {
+      loadSheetData(sheetId);
+    }
   };
 
-  // Колонки для таблицы
+  // ========== ПРАВИЛЬНЫЙ ОБРАБОТЧИК ДЛЯ DataGrid v7 ==========
+  const handleRowSelectionChange = (newSelection) => {
+    console.log("📌 Row selection changed:", newSelection);
+    
+    // В v7 newSelection - это массив ID выбранных строк
+    const selectionArray = Array.isArray(newSelection) ? newSelection : [];
+    
+    // Преобразуем в числа
+    const numericSelection = selectionArray.map(id => Number(id));
+    console.log("📌 Numeric selection:", numericSelection);
+    console.log("📌 Selection length:", numericSelection.length);
+    
+    setSelectedItems(numericSelection);
+  };
+
+  // ========== ТЕСТОВЫЙ ВЫБОР ==========
+  const handleTestSelect = () => {
+    if (items.length > 0) {
+      const testId = items[0].id;
+      console.log("🧪 Test selecting ID:", testId);
+      setSelectedItems([testId]);
+    }
+  };
+
+  const handleSelectAll = () => {
+    if (items.length > 0) {
+      const allIds = items.map(item => item.id);
+      console.log("🧪 Selecting all IDs:", allIds);
+      setSelectedItems(allIds);
+    }
+  };
+
+  const handleClearSelection = () => {
+    console.log("🧹 Clearing selection");
+    setSelectedItems([]);
+  };
+
+  // ========== КОЛОНКИ ==========
   const columns = [
-    { field: 'position', headerName: '№', width: 70 },
-    { field: 'address', headerName: 'Адрес (Марка)', width: 200 },
-    { field: 'material_name', headerName: 'Наименование материала', width: 300 },
-    { field: 'requested_quantity', headerName: 'Затреб (тонн)', width: 120, type: 'number' },
-    { field: 'weight_tons', headerName: 'Вес (тонн)', width: 120, type: 'number' },
     { 
-      field: 'calculated_meters', 
-      headerName: 'Пересчитано (метров)', 
-      width: 150,
+      field: "id", 
+      headerName: "ID", 
+      width: 70,
       type: 'number',
+    },
+    { 
+      field: "position", 
+      headerName: "№", 
+      width: 70,
+      type: 'number',
+    },
+    { field: "address", headerName: "Адрес (Марка)", width: 200 },
+    {
+      field: "material_name",
+      headerName: "Наименование материала",
+      width: 300,
+    },
+    {
+      field: "requested_quantity",
+      headerName: "Затреб (тонн)",
+      width: 120,
+      type: "number",
+      renderCell: (params) => (
+        <span>{params.value ? Number(params.value).toFixed(3) : "-"}</span>
+      ),
+    },
+    {
+      field: "weight_tons",
+      headerName: "Вес (тонн)",
+      width: 120,
+      type: "number",
+      renderCell: (params) => (
+        <span>{params.value ? Number(params.value).toFixed(3) : "-"}</span>
+      ),
+    },
+    {
+      field: "calculated_meters",
+      headerName: "Пересчитано (метров)",
+      width: 150,
+      type: "number",
       renderCell: (params) => (
         <Box>
           {params.value ? (
-            <Chip 
-              label={Number(params.value).toFixed(2)} 
-              color="success" 
+            <Chip
+              label={Number(params.value).toFixed(2)}
+              color="success"
               size="small"
               variant="outlined"
             />
-          ) : '-'}
+          ) : (
+            "-"
+          )}
         </Box>
-      )
+      ),
     },
-    { field: 'profile_type', headerName: 'Тип', width: 100 },
-    { 
-      field: 'is_calculated', 
-      headerName: 'Статус', 
+    { field: "profile_type", headerName: "Тип", width: 100 },
+    {
+      field: "is_calculated",
+      headerName: "Статус",
       width: 100,
       renderCell: (params) => (
-        <Chip 
-          label={params.value ? '✓' : 'Ожидает'} 
-          color={params.value ? 'success' : 'default'}
+        <Chip
+          label={params.value ? "✓" : "Ожидает"}
+          color={params.value ? "success" : "default"}
           size="small"
         />
-      )
-    }
+      ),
+    },
   ];
 
+  // ========== ОТЛАДКА ==========
+  useEffect(() => {
+    console.log("🔥 State:", {
+      batchId,
+      sheetId,
+      itemsCount: items.length,
+      loading,
+      processing,
+      selectedItems: selectedItems,
+      selectedItemsLength: selectedItems.length,
+    });
+  }, [batchId, sheetId, items, loading, processing, selectedItems]);
+
+  // ========== РЕНДЕР ==========
   return (
     <Box sx={{ p: 3 }}>
       <Typography variant="h4" gutterBottom>
         Дефектная ведомость
-        {connectionStatus && (
-          <Chip 
-            label="WebSocket подключен" 
-            color="success" 
-            size="small" 
+        {connectionStatus === "connected" && (
+          <Chip
+            label="WebSocket подключен"
+            color="success"
+            size="small"
             sx={{ ml: 2 }}
           />
         )}
@@ -598,43 +511,94 @@ const loadSheetData = async (id) => {
       ) : (
         <Box>
           <Paper sx={{ p: 2, mb: 2 }}>
-            <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
-              <Typography variant="subtitle1">
-                Batch ID: {batchId}
-              </Typography>
-              <Chip 
-                label={processing ? 'Обработка...' : 'Готово'} 
-                color={processing ? 'warning' : 'success'}
+            <Box sx={{ display: "flex", gap: 2, alignItems: "center", flexWrap: "wrap" }}>
+              <Typography variant="subtitle1">Batch ID: {batchId}</Typography>
+              <Chip
+                label={processing ? "Обработка..." : "Готово"}
+                color={processing ? "warning" : "success"}
               />
+              <Chip label={`Записей: ${items.length}`} color="info" variant="outlined" />
+              <Chip
+                label={`Выбрано: ${selectedItems.length}`}
+                color={selectedItems.length > 0 ? "primary" : "default"}
+                variant="outlined"
+              />
+
               <Box sx={{ flexGrow: 1 }} />
+
               <Tooltip title="Обновить">
                 <IconButton onClick={handleRefresh} disabled={loading}>
                   <RefreshIcon />
                 </IconButton>
               </Tooltip>
+
+              {/* Вспомогательные кнопки */}
               <Button
+                variant="outlined"
+                color="warning"
+                size="small"
+                onClick={handleTestSelect}
+                disabled={items.length === 0}
+              >
+                Выбрать первый
+              </Button>
+              
+              <Button
+                variant="outlined"
+                color="warning"
+                size="small"
+                onClick={handleSelectAll}
+                disabled={items.length === 0}
+              >
+                Выбрать все
+              </Button>
+              
+              <Button
+                variant="outlined"
+                color="warning"
+                size="small"
+                onClick={handleClearSelection}
+                disabled={selectedItems.length === 0}
+              >
+                Очистить
+              </Button>
+
+              {/* Основная кнопка */}
+              <Button
+                id="calculate-button"
                 variant="contained"
                 color="primary"
                 startIcon={<CalculateIcon />}
-                onClick={() => setCalculatorOpen(true)}
+                onClick={() => {
+                  console.log("🎯 Calculate button clicked");
+                  console.log("🎯 Selected items:", selectedItems);
+                  if (selectedItems.length > 0) {
+                    setCalculatorOpen(true);
+                  } else {
+                    showNotification("Сначала выберите строки", "warning");
+                  }
+                }}
                 disabled={selectedItems.length === 0 || processing}
               >
                 Пересчитать ({selectedItems.length})
               </Button>
+
               <Button
                 variant="outlined"
                 color="primary"
                 startIcon={<SaveIcon />}
                 onClick={handleSave}
-                disabled={processing}
+                disabled={processing || items.length === 0}
               >
                 Сохранить
               </Button>
+
               <Button
                 variant="outlined"
                 color="secondary"
                 startIcon={<DownloadIcon />}
                 onClick={handleExport}
+                disabled={items.length === 0}
               >
                 Экспорт
               </Button>
@@ -643,31 +607,34 @@ const loadSheetData = async (id) => {
 
           {processing && <LinearProgress sx={{ mb: 2 }} />}
 
-          <Paper sx={{ height: 600, width: '100%' }}>
+          <Paper sx={{ height: 600, width: "100%" }}>
             <DataGrid
               rows={items}
               columns={columns}
-              pageSize={10}
-              rowsPerPageOptions={[10, 25, 50]}
               checkboxSelection
               loading={loading}
-              onSelectionModelChange={(newSelection) => {
-                console.log('Selection changed:', newSelection);
-                setSelectedItems(newSelection);
-              }}
-              selectionModel={selectedItems}
+              onRowSelectionModelChange={handleRowSelectionChange}
+              rowSelectionModel={selectedItems}
               getRowId={(row) => row.id}
-              disableSelectionOnClick
+              disableRowSelectionOnClick={false}
+              paginationModel={paginationModel}
+              onPaginationModelChange={setPaginationModel}
+              pageSizeOptions={[10, 25, 50]}
+              slots={{
+                toolbar: GridToolbar,
+              }}
             />
           </Paper>
         </Box>
       )}
 
-      <MetalCalculator
+      <MetalCalculatorModal
         open={calculatorOpen}
-        formulas={formulas}
-        onCalculate={handleCalculate}
         onClose={() => setCalculatorOpen(false)}
+        onCalculate={handleCalculate}
+        selectedItems={selectedItems}
+        itemsData={items}
+        formulas={PROFILE_TYPES}
       />
 
       <Snackbar
@@ -675,10 +642,7 @@ const loadSheetData = async (id) => {
         autoHideDuration={6000}
         onClose={() => setNotification({ ...notification, open: false })}
       >
-        <Alert 
-          severity={notification.severity} 
-          onClose={() => setNotification({ ...notification, open: false })}
-        >
+        <Alert severity={notification.severity}>
           {notification.message}
         </Alert>
       </Snackbar>

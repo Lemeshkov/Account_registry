@@ -1346,6 +1346,7 @@ def process_defect_sheet_background(file_path: Path, batch_id: str, original_fil
     """Фоновая задача для парсинга дефектной ведомости"""
     from crud import create_defect_sheet, create_defect_sheet_items, get_defect_sheet_by_batch
     from datetime import datetime
+    import asyncio
     
     db = SessionLocal()
     sheet = None
@@ -1356,14 +1357,22 @@ def process_defect_sheet_background(file_path: Path, batch_id: str, original_fil
         log.info(f"[DEFECT] Starting parsing of {file_path.name}")
         
         # Обновляем статус через WebSocket
-        asyncio.run(websocket_manager.broadcast_to_batch(batch_id, {
-            "type": "defect_sheet_status",
-            "batch_id": batch_id,
-            "status": "parsing",
-            "progress": 30
-        }))
+        try:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            loop.run_until_complete(
+                websocket_manager.broadcast_to_batch(batch_id, {
+                    "type": "defect_sheet_status",
+                    "batch_id": batch_id,
+                    "status": "parsing",
+                    "progress": 30
+                })
+            )
+            loop.close()
+        except Exception as ws_error:
+            log.warning(f"WebSocket status update failed: {ws_error}")
         
-        # Парсим файл с обработкой ошибок
+        # Парсим файл
         try:
             items, metadata = parse_defect_sheet(file_path)
             log.info(f"[DEFECT] Parsed {len(items)} items")
@@ -1398,35 +1407,55 @@ def process_defect_sheet_background(file_path: Path, batch_id: str, original_fil
         sheet.total_items = len(items)
         db.commit()
         
-        # Уведомляем об успешном завершении
-        asyncio.run(websocket_manager.broadcast_to_batch(batch_id, {
-            "type": "defect_sheet_processed",
-            "batch_id": batch_id,
-            "sheet_id": sheet.id,
-            "status": "processed",
-            "total_items": len(items),
-            "metadata": metadata,
-            "progress": 100
-        }))
+        # НЕБОЛЬШАЯ ЗАДЕРЖКА перед отправкой WebSocket
+        import time
+        time.sleep(1)  # Даем время клиенту подключиться
+        
+        # Отправляем WebSocket сообщение
+        try:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            
+            message = {
+                "type": "defect_sheet_processed",
+                "batch_id": batch_id,
+                "sheet_id": sheet.id,
+                "status": "processed",
+                "total_items": len(items),
+                "metadata": metadata
+            }
+            
+            log.info(f"📤 Sending WebSocket message: {message}")
+            loop.run_until_complete(
+                websocket_manager.broadcast_to_batch(batch_id, message)
+            )
+            loop.close()
+            
+        except Exception as ws_error:
+            log.error(f"Failed to send WebSocket notification: {ws_error}")
         
         log.info(f"[DEFECT] Successfully processed {file_path.name}")
         
     except Exception as e:
         log.exception(f"[DEFECT] Error processing {file_path.name}: {e}")
         
-        # Обновляем статус на ошибку (только если sheet существует)
+        # Обновляем статус на ошибку
         if sheet:
             sheet.status = "error"
             db.commit()
         
-        # Уведомляем об ошибке
+        # Отправляем сообщение об ошибке
         try:
-            asyncio.run(websocket_manager.broadcast_to_batch(batch_id, {
-                "type": "defect_sheet_error",
-                "batch_id": batch_id,
-                "status": "error",
-                "error": str(e)
-            }))
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            loop.run_until_complete(
+                websocket_manager.broadcast_to_batch(batch_id, {
+                    "type": "defect_sheet_error",
+                    "batch_id": batch_id,
+                    "error": str(e)
+                })
+            )
+            loop.close()
         except:
             pass
     finally:
@@ -1462,7 +1491,41 @@ def preview_defect_sheet(batch_id: str, db: Session = Depends(get_db)):
 def get_defect_items(sheet_id: int, db: Session = Depends(get_db)):
     """Получить все строки дефектной ведомости по ID"""
     items = get_defect_sheet_items(db, sheet_id)
-    return {"items": items, "total": len(items)}
+    
+    print(f"📊 Found {len(items)} items in DB for sheet {sheet_id}")  # Отладка
+
+    # Преобразуем SQLAlchemy объекты в словари
+    result = []
+    for item in items:
+        result.append({
+            "id": item.id,
+            "position": item.position,
+            "excel_position": item.excel_position,
+            "subposition": item.subposition,
+            "address": item.address,
+            "material_name": item.material_name,
+            "requested_quantity": float(item.requested_quantity) if item.requested_quantity else None,
+            "weight_tons": float(item.weight_tons) if item.weight_tons else None,
+            "calculated_meters": float(item.calculated_meters) if item.calculated_meters else None,
+            "profile_type": item.profile_type,
+            "profile_params": item.profile_params,
+            "formula_used": item.formula_used,
+            "is_calculated": item.is_calculated,
+            "selected_for_calculation": item.selected_for_calculation,
+            "calculated_at": item.calculated_at.isoformat() if item.calculated_at else None,
+            "requirement_number": item.requirement_number,
+            "requirement_date": item.requirement_date.isoformat() if item.requirement_date else None,
+            "car_brand": item.car_brand,
+            "license_plate": item.license_plate,
+            "recipient": item.recipient,
+            "article": item.article
+        })
+    
+    # Возвращаем объект с полем items (как ожидает фронтенд)
+    return {
+        "items": result,
+        "total": len(result)
+    }
 
 
 @app.post("/api/defect/calculate")

@@ -668,3 +668,275 @@ nav a:hover {
     text-align: center;
   }
 }
+
+/* Metal Calculator Modal Styles */
+.metal-calculator-modal .profile-type-selector {
+  margin-bottom: 20px;
+}
+
+.metal-calculator-modal .profile-type-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 10px;
+}
+
+.metal-calculator-modal .profile-type-btn {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  background: white;
+  cursor: pointer;
+  transition: all 0.2s;
+  font-size: 14px;
+}
+
+.metal-calculator-modal .profile-type-btn:hover {
+  border-color: #1976d2;
+  background: #f5f9ff;
+}
+
+.metal-calculator-modal .profile-type-btn.active {
+  border-color: #1976d2;
+  background: #e3f2fd;
+  box-shadow: 0 2px 4px rgba(25, 118, 210, 0.1);
+}
+
+.metal-calculator-modal .profile-icon {
+  font-size: 20px;
+}
+
+.metal-calculator-modal .profile-name {
+  font-weight: 500;
+}
+
+.metal-calculator-modal .params-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 15px;
+  margin-bottom: 15px;
+}
+
+.metal-calculator-modal .param-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.metal-calculator-modal .param-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: #666;
+}
+
+.metal-calculator-modal .required-star {
+  color: #d32f2f;
+  margin-left: 3px;
+}
+
+.metal-calculator-modal .param-input {
+  padding: 8px 12px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-size: 14px;
+  transition: border-color 0.2s;
+}
+
+.metal-calculator-modal .param-input:focus {
+  outline: none;
+  border-color: #1976d2;
+}
+
+.metal-calculator-modal .param-input.error {
+  border-color: #d32f2f;
+}
+
+.metal-calculator-modal .param-error {
+  font-size: 12px;
+  color: #d32f2f;
+}
+
+.metal-calculator-modal .auto-detect-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  background: #f5f5f5;
+  border: 1px dashed #999;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 13px;
+  transition: all 0.2s;
+}
+
+.metal-calculator-modal .auto-detect-btn:hover:not(:disabled) {
+  background: #e3f2fd;
+  border-color: #1976d2;
+}
+
+.metal-calculator-modal .auto-detect-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.metal-calculator-modal .auto-detected-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 8px;
+  background: #4caf50;
+  color: white;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 500;
+  margin-left: 10px;
+}
+
+.metal-calculator-modal .apply-settings {
+  padding: 10px 0;
+}
+
+.metal-calculator-modal .checkbox-label {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.metal-calculator-modal .checkbox-label input[type="checkbox"] {
+  margin-top: 2px;
+}
+
+.metal-calculator-modal .checkbox-hint {
+  display: block;
+  font-size: 12px;
+  color: #666;
+  margin-top: 2px;
+}
+
+.metal-calculator-modal .warning-message {
+  margin-top: 10px;
+  padding: 8px 12px;
+  background: #fff3e0;
+  border-left: 3px solid #ff9800;
+  border-radius: 4px;
+  font-size: 13px;
+  color: #663c00;
+}
+
+.metal-calculator-modal .preview-card {
+  background: #f5f9ff;
+  border: 1px solid #bbdefb;
+  border-radius: 8px;
+  padding: 15px;
+}
+
+.metal-calculator-modal .preview-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 8px 0;
+  border-bottom: 1px solid #e0e0e0;
+}
+
+.metal-calculator-modal .preview-row:last-child {
+  border-bottom: none;
+}
+
+.metal-calculator-modal .preview-row.highlight {
+  background: #e3f2fd;
+  margin: 8px -15px;
+  padding: 12px 15px;
+  font-size: 16px;
+}
+
+.metal-calculator-modal .preview-label {
+  color: #555;
+  font-weight: 500;
+}
+
+.metal-calculator-modal .preview-value {
+  font-weight: 600;
+  color: #1976d2;
+}
+
+.metal-calculator-modal .preview-value.formula {
+  font-family: monospace;
+  background: white;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+}
+
+.metal-calculator-modal .preview-note {
+  margin-top: 10px;
+  font-size: 12px;
+  color: #666;
+  font-style: italic;
+  text-align: center;
+}
+
+.metal-calculator-modal .selected-items-preview {
+  max-height: 200px;
+  overflow-y: auto;
+  border: 1px solid #e0e0e0;
+  border-radius: 4px;
+}
+
+.metal-calculator-modal .selected-item {
+  padding: 10px;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.metal-calculator-modal .selected-item:last-child {
+  border-bottom: none;
+}
+
+.metal-calculator-modal .item-material {
+  font-weight: 500;
+  margin-bottom: 4px;
+}
+
+.metal-calculator-modal .item-details {
+  display: flex;
+  gap: 10px;
+  font-size: 12px;
+  color: #666;
+}
+
+.metal-calculator-modal .item-weight {
+  background: #e0e0e0;
+  padding: 2px 6px;
+  border-radius: 3px;
+}
+
+.metal-calculator-modal .item-profile {
+  background: #e3f2fd;
+  padding: 2px 6px;
+  border-radius: 3px;
+}
+
+.metal-calculator-modal .more-items {
+  padding: 10px;
+  text-align: center;
+  color: #666;
+  font-style: italic;
+  background: #f5f5f5;
+}
+
+.metal-calculator-modal .selection-details {
+  font-size: 13px;
+  font-weight: normal;
+  color: #666;
+  margin-left: 5px;
+}
+
+.metal-calculator-modal .count-badge {
+  margin-left: 10px;
+  background: #1976d2;
+  color: white;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 12px;
+}

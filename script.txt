@@ -41,11 +41,30 @@ set PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK=True
 
  Проверить что переменные загрузились
 echo %DATABASE_URL%
+---------------------------------------------------------
+# Остановить всё
+docker compose down
+
+# Запустить основные сервисы
+docker compose up -d postgres redis backend frontend
+
+# Или всё сразу (включая pgadmin и redis-commander)
+docker compose --profile tools up -d
+
+# Посмотреть логи
+docker compose logs -f
+---------------------------------------------------------
+# Проверить, что всё работает
+docker ps
+
 
 cd backend
 uvicorn main:app --reload
 cd C:\Users\1111111\Account_registry\frontend
 npm run dev
+
+# В терминале с бэкендом нажмите Ctrl+C и запустите заново:
+uvicorn main:app --reload --host 0.0.0.0 --port 8000
 
 
 # Подключитесь к PostgreSQL через Docker

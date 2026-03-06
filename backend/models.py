@@ -180,6 +180,10 @@ class DefectSheetItem(Base):
     # Позиция в исходном документе
     position = Column(Integer, nullable=False)
     
+    # ДОБАВЛЯЕМ эти поля - их не хватает!
+    excel_position = Column(Integer, nullable=True)  # оригинальный номер из Excel
+    subposition = Column(Integer, default=1)  # для множественных запчастей
+    
     # Данные из Excel (маппинг согласно ТЗ)
     address = Column(String, nullable=True)  # из поля "Марка"
     material_name = Column(String, nullable=True)  # из поля "Наименование зап.части"
@@ -191,6 +195,7 @@ class DefectSheetItem(Base):
     car_brand = Column(String, nullable=True)
     license_plate = Column(String, nullable=True)
     recipient = Column(String, nullable=True)  # получатель
+    article = Column(String, nullable=True)  # номенкл. номер (добавьте, если нужно)
     
     # Поля для калькулятора металлопроката
     profile_type = Column(String, nullable=True)  # тип профиля (труба, и т.д.)

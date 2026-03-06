@@ -329,29 +329,43 @@ def create_defect_sheet(db: Session, file_name: str, batch_id: Optional[str] = N
     db.flush()  # Чтобы получить id
     return sheet
 
-def create_defect_sheet_items(db: Session, sheet_id: int, items: List[Dict]) -> List[models.DefectSheetItem]:
+def create_defect_sheet_items(db: Session, sheet_id: int, items_data: List[Dict]):
     """Создать строки дефектной ведомости"""
     created_items = []
     
-    for item_data in items:
-        item = models.DefectSheetItem(
+    for idx, item_data in enumerate(items_data):
+        # Проверяем, что item_data - это словарь, а не кортеж
+        if isinstance(item_data, tuple):
+            # Если пришёл кортеж (item, position)
+            item_dict, position = item_data
+        else:
+            # Если просто словарь
+            item_dict = item_data
+            position = idx + 1  # генерируем позицию, если нет
+        
+        # Создаем запись в БД
+        db_item = models.DefectSheetItem(
             sheet_id=sheet_id,
-            position=item_data.get("position"),
-            address=item_data.get("address"),
-            material_name=item_data.get("material_name"),
-            requested_quantity=item_data.get("requested_quantity"),
-            requirement_number=item_data.get("requirement_number"),
-            requirement_date=item_data.get("requirement_date"),
-            car_brand=item_data.get("car_brand"),
-            license_plate=item_data.get("license_plate"),
-            recipient=item_data.get("recipient"),
-            weight_tons=item_data.get("weight_tons") or item_data.get("requested_quantity"),
-            profile_type=item_data.get("profile_type"),
-            profile_params=item_data.get("profile_params"),
-            is_calculated=False
+            position=position,  # уникальная позиция
+            excel_position=item_dict.get('excel_position'),  # оригинальный номер
+            subposition=item_dict.get('subposition', 1),
+            requirement_number=item_dict.get('requirement_number'),
+            requirement_date=item_dict.get('requirement_date'),
+            address=item_dict.get('address'),
+            license_plate=item_dict.get('license_plate'),
+            recipient=item_dict.get('recipient'),
+            article=item_dict.get('article'),
+            material_name=item_dict.get('material_name'),
+            requested_quantity=item_dict.get('requested_quantity'),
+            weight_tons=item_dict.get('weight_tons', item_dict.get('requested_quantity')),
+            profile_type=item_dict.get('profile_type'),
+            profile_params=item_dict.get('profile_params'),
+            is_calculated=False,
+            selected_for_calculation=False
         )
-        db.add(item)
-        created_items.append(item)
+        
+        db.add(db_item)
+        created_items.append(db_item)
     
     db.flush()
     return created_items
@@ -366,9 +380,15 @@ def get_defect_sheet_by_batch(db: Session, batch_id: str) -> Optional[models.Def
 
 def get_defect_sheet_items(db: Session, sheet_id: int) -> List[models.DefectSheetItem]:
     """Получить все строки дефектной ведомости"""
-    return db.query(models.DefectSheetItem).filter(
+    items = db.query(models.DefectSheetItem).filter(
         models.DefectSheetItem.sheet_id == sheet_id
     ).order_by(models.DefectSheetItem.position).all()
+    
+    print(f"🔍 get_defect_sheet_items found {len(items)} items for sheet {sheet_id}")
+    if items:
+        print(f"🔍 First item: id={items[0].id}, position={items[0].position}, material={items[0].material_name}")
+    
+    return items
 
 def update_defect_sheet_status(db: Session, sheet_id: int, status: str):
     """Обновить статус ведомости"""
