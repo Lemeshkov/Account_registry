@@ -10,17 +10,33 @@ import {
   Chip,
   IconButton,
   Tooltip,
+  TextField,
+  Select,
+  MenuItem,
+  FormControl,
+  InputLabel,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
 } from "@mui/material";
 import {
   Calculate as CalculateIcon,
   Save as SaveIcon,
   Download as DownloadIcon,
   Refresh as RefreshIcon,
+  Edit as EditIcon,
+  Check as CheckIcon,
+  Close as CloseIcon,
+  Functions as CalculatorIcon,
+  Delete as DeleteIcon,
+  DeleteSweep as DeleteSweepIcon,
 } from "@mui/icons-material";
 import { DataGrid, GridToolbar } from "@mui/x-data-grid";
 import { useWebSocket } from "../hooks/useWebSocket";
 import DefectSheetUploader from "../components/DefectSheetUploader";
 import MetalCalculatorModal from "../components/MetalCalculatorModal";
+import SimpleCalculatorModal from "../components/SimpleCalculatorModal";
 import api from "../services/api";
 
 const PROFILE_TYPES = {
@@ -169,10 +185,14 @@ const DefectSheetPage = () => {
     severity: "info",
   });
   const [calculatorOpen, setCalculatorOpen] = useState(false);
+  const [simpleCalculatorOpen, setSimpleCalculatorOpen] = useState(false);
   const [paginationModel, setPaginationModel] = useState({
     pageSize: 10,
     page: 0,
   });
+  const [editCell, setEditCell] = useState(null);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [itemToDelete, setItemToDelete] = useState(null);
 
   const { lastMessage, connectionStatus } = useWebSocket(batchId);
 
@@ -195,7 +215,8 @@ const DefectSheetPage = () => {
         console.log(`✅ Setting ${data.items.length} items`);
         const itemsWithNumericIds = data.items.map(item => ({
           ...item,
-          id: Number(item.id)
+          id: Number(item.id),
+          isEditing: false,
         }));
         console.log("📦 Items with numeric IDs:", itemsWithNumericIds);
         setItems(itemsWithNumericIds);
@@ -203,7 +224,8 @@ const DefectSheetPage = () => {
       } else if (Array.isArray(data)) {
         const itemsWithNumericIds = data.map(item => ({
           ...item,
-          id: Number(item.id)
+          id: Number(item.id),
+          isEditing: false,
         }));
         console.log(`✅ Setting ${itemsWithNumericIds.length} items from array`);
         setItems(itemsWithNumericIds);
@@ -323,6 +345,68 @@ const DefectSheetPage = () => {
     }
   };
 
+  // ========== КАЛЬКУЛЯТОР ДЛЯ ОДНОЙ СТРОКИ ==========
+  const handleSimpleCalculate = (result) => {
+    if (result.isNewRow) {
+      // Создаем новую строку
+      const newItem = {
+        ...result.newRowData,
+        id: Date.now(), // временный ID
+      };
+      setItems(prevItems => [...prevItems, newItem]);
+      showNotification(`Новая строка создана: ${result.meters} м`, "success");
+    } else {
+      // Обновляем существующую строку
+      setItems(prevItems => 
+        prevItems.map(item => 
+          item.id === result.id 
+            ? { 
+                ...item, 
+                calculated_meters: result.meters,
+                profile_type: result.profileType,
+                is_calculated: true,
+                formula_used: result.formula,
+                weight_tons: result.weightTons || item.weight_tons,
+                requested_quantity: result.weightTons || item.requested_quantity
+              } 
+            : item
+        )
+      );
+      showNotification(`Строка пересчитана: ${result.meters} м`, "success");
+    }
+  };
+
+  // ========== УДАЛЕНИЕ СТРОК ==========
+  const handleDeleteClick = (id) => {
+    setItemToDelete(id);
+    setDeleteDialogOpen(true);
+  };
+
+  const handleDeleteSelected = () => {
+    if (selectedItems.length === 0) {
+      showNotification("Выберите строки для удаления", "warning");
+      return;
+    }
+    setItemToDelete('selected');
+    setDeleteDialogOpen(true);
+  };
+
+  const confirmDelete = () => {
+    if (itemToDelete === 'selected') {
+      // Удаляем выбранные строки
+      setItems(prevItems => prevItems.filter(item => !selectedItems.includes(item.id)));
+      setSelectedItems([]);
+      showNotification(`Удалено ${selectedItems.length} строк`, "success");
+    } else {
+      // Удаляем одну строку
+      setItems(prevItems => prevItems.filter(item => item.id !== itemToDelete));
+      setSelectedItems(prev => prev.filter(id => id !== itemToDelete));
+      showNotification("Строка удалена", "success");
+    }
+    setDeleteDialogOpen(false);
+    setItemToDelete(null);
+  };
+
   const handleSave = async () => {
     try {
       console.log("💾 Saving sheet:", sheetId);
@@ -368,19 +452,39 @@ const DefectSheetPage = () => {
     }
   };
 
-  // ========== ПРАВИЛЬНЫЙ ОБРАБОТЧИК ДЛЯ DataGrid v7 ==========
+  // ========== ОБРАБОТЧИК ВЫДЕЛЕНИЯ ==========
   const handleRowSelectionChange = (newSelection) => {
     console.log("📌 Row selection changed:", newSelection);
-    
-    // В v7 newSelection - это массив ID выбранных строк
     const selectionArray = Array.isArray(newSelection) ? newSelection : [];
-    
-    // Преобразуем в числа
     const numericSelection = selectionArray.map(id => Number(id));
-    console.log("📌 Numeric selection:", numericSelection);
-    console.log("📌 Selection length:", numericSelection.length);
-    
     setSelectedItems(numericSelection);
+  };
+
+  // ========== РЕДАКТИРОВАНИЕ ЯЧЕЕК ==========
+  const handleCellEditStart = (id, field, value) => {
+    setEditCell({ id, field, value });
+  };
+
+  const handleCellEditCancel = () => {
+    setEditCell(null);
+  };
+
+  const handleCellEditSave = (id, field, newValue) => {
+    setItems(prevItems =>
+      prevItems.map(item =>
+        item.id === id ? { ...item, [field]: newValue } : item
+      )
+    );
+    setEditCell(null);
+    showNotification(`Ячейка обновлена`, "info");
+  };
+
+  const handleCellEditKeyDown = (e, id, field) => {
+    if (e.key === 'Enter') {
+      handleCellEditSave(id, field, e.target.value);
+    } else if (e.key === 'Escape') {
+      handleCellEditCancel();
+    }
   };
 
   // ========== ТЕСТОВЫЙ ВЫБОР ==========
@@ -395,17 +499,57 @@ const DefectSheetPage = () => {
   const handleSelectAll = () => {
     if (items.length > 0) {
       const allIds = items.map(item => item.id);
-      console.log("🧪 Selecting all IDs:", allIds);
       setSelectedItems(allIds);
     }
   };
 
   const handleClearSelection = () => {
-    console.log("🧹 Clearing selection");
     setSelectedItems([]);
   };
 
-  // ========== КОЛОНКИ ==========
+  // ========== РЕДАКТИРУЕМЫЕ КОЛОНКИ ==========
+  const renderEditableCell = (params) => {
+    const { id, field, value } = params;
+    const isEditing = editCell && editCell.id === id && editCell.field === field;
+
+    if (isEditing) {
+      return (
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+          <TextField
+            size="small"
+            defaultValue={value}
+            autoFocus
+            onBlur={(e) => handleCellEditSave(id, field, e.target.value)}
+            onKeyDown={(e) => handleCellEditKeyDown(e, id, field)}
+            sx={{ width: '100%' }}
+          />
+          <IconButton size="small" onClick={() => handleCellEditSave(id, field, document.getElementById(`edit-${id}-${field}`)?.value)}>
+            <CheckIcon fontSize="small" />
+          </IconButton>
+          <IconButton size="small" onClick={handleCellEditCancel}>
+            <CloseIcon fontSize="small" />
+          </IconButton>
+        </Box>
+      );
+    }
+
+    return (
+      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <Typography variant="body2">
+          {value || '-'}
+        </Typography>
+        <IconButton 
+          size="small" 
+          onClick={() => handleCellEditStart(id, field, value)}
+          sx={{ opacity: 0.5, '&:hover': { opacity: 1 } }}
+        >
+          <EditIcon fontSize="small" />
+        </IconButton>
+      </Box>
+    );
+  };
+
+  // ========== КОЛОНКИ С РЕДАКТИРОВАНИЕМ И УДАЛЕНИЕМ ==========
   const columns = [
     { 
       field: "id", 
@@ -419,37 +563,45 @@ const DefectSheetPage = () => {
       width: 70,
       type: 'number',
     },
-    { field: "address", headerName: "Адрес (Марка)", width: 200 },
+    { 
+      field: "address", 
+      headerName: "Адрес (Марка)", 
+      width: 200,
+      renderCell: (params) => renderEditableCell(params),
+    },
     {
       field: "material_name",
       headerName: "Наименование материала",
       width: 300,
+      renderCell: (params) => renderEditableCell(params),
     },
     {
       field: "requested_quantity",
       headerName: "Затреб (тонн)",
       width: 120,
       type: "number",
-      renderCell: (params) => (
-        <span>{params.value ? Number(params.value).toFixed(3) : "-"}</span>
-      ),
+      renderCell: (params) => {
+        const value = params.value ? Number(params.value).toFixed(3) : "-";
+        return renderEditableCell({ ...params, value });
+      },
     },
     {
       field: "weight_tons",
       headerName: "Вес (тонн)",
       width: 120,
       type: "number",
-      renderCell: (params) => (
-        <span>{params.value ? Number(params.value).toFixed(3) : "-"}</span>
-      ),
+      renderCell: (params) => {
+        const value = params.value ? Number(params.value).toFixed(3) : "-";
+        return renderEditableCell({ ...params, value });
+      },
     },
     {
       field: "calculated_meters",
       headerName: "Пересчитано (метров)",
-      width: 150,
+      width: 180,
       type: "number",
       renderCell: (params) => (
-        <Box>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, width: '100%' }}>
           {params.value ? (
             <Chip
               label={Number(params.value).toFixed(2)}
@@ -458,22 +610,71 @@ const DefectSheetPage = () => {
               variant="outlined"
             />
           ) : (
-            "-"
+            <Typography variant="body2" color="textSecondary">-</Typography>
           )}
+          <Tooltip title="Открыть калькулятор">
+            <IconButton 
+              size="small"
+              color="primary"
+              onClick={() => {
+                const item = items.find(i => i.id === params.id);
+                setSimpleCalculatorOpen({
+                  open: true,
+                  item: item
+                });
+              }}
+            >
+              <CalculatorIcon fontSize="small" />
+            </IconButton>
+          </Tooltip>
         </Box>
       ),
     },
-    { field: "profile_type", headerName: "Тип", width: 100 },
+    { 
+      field: "profile_type", 
+      headerName: "Тип", 
+      width: 100,
+      renderCell: (params) => {
+        const profile = PROFILE_TYPES[params.value];
+        return (
+          <Chip
+            label={profile?.icon || params.value || 'Не выбран'}
+            size="small"
+            variant="outlined"
+          />
+        );
+      },
+    },
     {
       field: "is_calculated",
       headerName: "Статус",
       width: 100,
       renderCell: (params) => (
         <Chip
-          label={params.value ? "✓" : "Ожидает"}
+          label={params.value ? "✓ Пересчитано" : "Ожидает"}
           color={params.value ? "success" : "default"}
           size="small"
         />
+      ),
+    },
+    {
+      field: "actions",
+      headerName: "Действия",
+      width: 100,
+      sortable: false,
+      filterable: false,
+      renderCell: (params) => (
+        <Box sx={{ display: 'flex', gap: 0.5 }}>
+          <Tooltip title="Удалить строку">
+            <IconButton 
+              size="small" 
+              color="error"
+              onClick={() => handleDeleteClick(params.id)}
+            >
+              <DeleteIcon fontSize="small" />
+            </IconButton>
+          </Tooltip>
+        </Box>
       ),
     },
   ];
@@ -563,15 +764,35 @@ const DefectSheetPage = () => {
                 Очистить
               </Button>
 
-              {/* Основная кнопка */}
+              {/* Кнопка удаления выбранных */}
+              <Button
+                variant="outlined"
+                color="error"
+                size="small"
+                startIcon={<DeleteSweepIcon />}
+                onClick={handleDeleteSelected}
+                disabled={selectedItems.length === 0}
+              >
+                Удалить выбранные ({selectedItems.length})
+              </Button>
+
+              {/* Кнопка калькулятора (всегда активна) */}
+              <Button
+                variant="contained"
+                color="secondary"
+                startIcon={<CalculatorIcon />}
+                onClick={() => setSimpleCalculatorOpen({ open: true, item: null })}
+              >
+                Калькулятор
+              </Button>
+
+              {/* Основная кнопка пересчета */}
               <Button
                 id="calculate-button"
                 variant="contained"
                 color="primary"
                 startIcon={<CalculateIcon />}
                 onClick={() => {
-                  console.log("🎯 Calculate button clicked");
-                  console.log("🎯 Selected items:", selectedItems);
                   if (selectedItems.length > 0) {
                     setCalculatorOpen(true);
                   } else {
@@ -623,16 +844,52 @@ const DefectSheetPage = () => {
               slots={{
                 toolbar: GridToolbar,
               }}
+              sx={{
+                '& .MuiDataGrid-cell:focus-within': {
+                  outline: 'none',
+                },
+              }}
             />
           </Paper>
         </Box>
       )}
 
+      {/* Диалог подтверждения удаления */}
+      <Dialog open={deleteDialogOpen} onClose={() => setDeleteDialogOpen(false)}>
+        <DialogTitle>
+          Подтверждение удаления
+        </DialogTitle>
+        <DialogContent>
+          <Typography>
+            {itemToDelete === 'selected' 
+              ? `Вы уверены, что хотите удалить ${selectedItems.length} выбранных строк?`
+              : 'Вы уверены, что хотите удалить эту строку?'}
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setDeleteDialogOpen(false)}>Отмена</Button>
+          <Button onClick={confirmDelete} color="error" variant="contained">
+            Удалить
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Модальное окно для пакетного пересчета */}
       <MetalCalculatorModal
         open={calculatorOpen}
         onClose={() => setCalculatorOpen(false)}
         onCalculate={handleCalculate}
         selectedItems={selectedItems}
+        itemsData={items}
+        formulas={PROFILE_TYPES}
+      />
+
+      {/* Модальное окно для простого калькулятора */}
+      <SimpleCalculatorModal
+        open={simpleCalculatorOpen?.open || false}
+        onClose={() => setSimpleCalculatorOpen({ open: false, item: null })}
+        onCalculate={handleSimpleCalculate}
+        item={simpleCalculatorOpen?.item}
         itemsData={items}
         formulas={PROFILE_TYPES}
       />
