@@ -213,7 +213,7 @@ const DefectSheetPage = () => {
 
       if (data && data.items && Array.isArray(data.items)) {
         console.log(`✅ Setting ${data.items.length} items`);
-        const itemsWithNumericIds = data.items.map(item => ({
+        const itemsWithNumericIds = data.items.map((item) => ({
           ...item,
           id: Number(item.id),
           isEditing: false,
@@ -222,12 +222,14 @@ const DefectSheetPage = () => {
         setItems(itemsWithNumericIds);
         setSelectedItems([]);
       } else if (Array.isArray(data)) {
-        const itemsWithNumericIds = data.map(item => ({
+        const itemsWithNumericIds = data.map((item) => ({
           ...item,
           id: Number(item.id),
           isEditing: false,
         }));
-        console.log(`✅ Setting ${itemsWithNumericIds.length} items from array`);
+        console.log(
+          `✅ Setting ${itemsWithNumericIds.length} items from array`,
+        );
         setItems(itemsWithNumericIds);
         setSelectedItems([]);
       } else {
@@ -353,24 +355,25 @@ const DefectSheetPage = () => {
         ...result.newRowData,
         id: Date.now(), // временный ID
       };
-      setItems(prevItems => [...prevItems, newItem]);
+      setItems((prevItems) => [...prevItems, newItem]);
       showNotification(`Новая строка создана: ${result.meters} м`, "success");
     } else {
       // Обновляем существующую строку
-      setItems(prevItems => 
-        prevItems.map(item => 
-          item.id === result.id 
-            ? { 
-                ...item, 
+      setItems((prevItems) =>
+        prevItems.map((item) =>
+          item.id === result.id
+            ? {
+                ...item,
                 calculated_meters: result.meters,
                 profile_type: result.profileType,
                 is_calculated: true,
                 formula_used: result.formula,
                 weight_tons: result.weightTons || item.weight_tons,
-                requested_quantity: result.weightTons || item.requested_quantity
-              } 
-            : item
-        )
+                requested_quantity:
+                  result.weightTons || item.requested_quantity,
+              }
+            : item,
+        ),
       );
       showNotification(`Строка пересчитана: ${result.meters} м`, "success");
     }
@@ -387,20 +390,24 @@ const DefectSheetPage = () => {
       showNotification("Выберите строки для удаления", "warning");
       return;
     }
-    setItemToDelete('selected');
+    setItemToDelete("selected");
     setDeleteDialogOpen(true);
   };
 
   const confirmDelete = () => {
-    if (itemToDelete === 'selected') {
+    if (itemToDelete === "selected") {
       // Удаляем выбранные строки
-      setItems(prevItems => prevItems.filter(item => !selectedItems.includes(item.id)));
+      setItems((prevItems) =>
+        prevItems.filter((item) => !selectedItems.includes(item.id)),
+      );
       setSelectedItems([]);
       showNotification(`Удалено ${selectedItems.length} строк`, "success");
     } else {
       // Удаляем одну строку
-      setItems(prevItems => prevItems.filter(item => item.id !== itemToDelete));
-      setSelectedItems(prev => prev.filter(id => id !== itemToDelete));
+      setItems((prevItems) =>
+        prevItems.filter((item) => item.id !== itemToDelete),
+      );
+      setSelectedItems((prev) => prev.filter((id) => id !== itemToDelete));
       showNotification("Строка удалена", "success");
     }
     setDeleteDialogOpen(false);
@@ -445,6 +452,87 @@ const DefectSheetPage = () => {
     }
   };
 
+  // ========== ЭКСПОРТ В ФОРМАТИРОВАННЫЙ EXCEL ==========
+  // ========== ЭКСПОРТ В ФОРМАТИРОВАННЫЙ EXCEL ==========
+// ========== ЭКСПОРТ В ФОРМАТИРОВАННЫЙ EXCEL (СУПЕР-ПРОСТАЯ ВЕРСИЯ) ==========
+// ========== ЭКСПОРТ В ФОРМАТИРОВАННЫЙ EXCEL (СУПЕР-ПРОСТАЯ ВЕРСИЯ) ==========
+const handleExportFormattedExcel = async () => {
+  console.log("🚀 ===== START EXPORT =====");
+  console.log("📊 Items count:", items.length);
+  console.log("🆔 Sheet ID:", sheetId);
+  console.log("🆔 Batch ID:", batchId);
+  
+  if (!items.length) {
+    console.log("⚠️ No items, aborting");
+    alert("Нет данных для экспорта");
+    return;
+  }
+
+  try {
+    setProcessing(true);
+    console.log("⏳ Processing set to true");
+
+    // Используем нативный fetch как в рабочем тесте
+    const url = 'http://localhost:8000/api/defect/export-excel';
+    console.log("📤 Fetching:", url);
+    console.log("📤 Body:", { sheet_id: sheetId });
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ sheet_id: sheetId })
+    });
+
+    console.log("📥 Response status:", response.status);
+    console.log("📥 Response ok:", response.ok);
+    console.log("📥 Response headers:", [...response.headers.entries()]);
+
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+
+    const blob = await response.blob();
+    console.log("📥 Blob size:", blob.size);
+    console.log("📥 Blob type:", blob.type);
+
+    if (blob.size === 0) {
+      throw new Error("Blob is empty");
+    }
+
+    // Скачивание
+    const downloadUrl = window.URL.createObjectURL(blob);
+    console.log("✅ Blob URL created:", downloadUrl);
+
+    const link = document.createElement('a');
+    link.href = downloadUrl;
+    link.download = `defect_sheet_${batchId || sheetId || "export"}.xlsx`;
+    console.log("📥 Download filename:", link.download);
+
+    document.body.appendChild(link);
+    console.log("✅ Link appended to body");
+
+    link.click();
+    console.log("✅ Clicked");
+
+    setTimeout(() => {
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(downloadUrl);
+      console.log("✅ Cleanup completed");
+    }, 100);
+
+    alert("Файл успешно экспортирован!");
+
+  } catch (error) {
+    console.error("❌ ERROR:", error);
+    alert(`Ошибка: ${error.message}`);
+  } finally {
+    setProcessing(false);
+    console.log("🏁 ===== EXPORT FINISHED =====");
+  }
+};
+
   const handleRefresh = () => {
     console.log("🔄 Manual refresh");
     if (sheetId) {
@@ -456,7 +544,7 @@ const DefectSheetPage = () => {
   const handleRowSelectionChange = (newSelection) => {
     console.log("📌 Row selection changed:", newSelection);
     const selectionArray = Array.isArray(newSelection) ? newSelection : [];
-    const numericSelection = selectionArray.map(id => Number(id));
+    const numericSelection = selectionArray.map((id) => Number(id));
     setSelectedItems(numericSelection);
   };
 
@@ -470,19 +558,19 @@ const DefectSheetPage = () => {
   };
 
   const handleCellEditSave = (id, field, newValue) => {
-    setItems(prevItems =>
-      prevItems.map(item =>
-        item.id === id ? { ...item, [field]: newValue } : item
-      )
+    setItems((prevItems) =>
+      prevItems.map((item) =>
+        item.id === id ? { ...item, [field]: newValue } : item,
+      ),
     );
     setEditCell(null);
     showNotification(`Ячейка обновлена`, "info");
   };
 
   const handleCellEditKeyDown = (e, id, field) => {
-    if (e.key === 'Enter') {
+    if (e.key === "Enter") {
       handleCellEditSave(id, field, e.target.value);
-    } else if (e.key === 'Escape') {
+    } else if (e.key === "Escape") {
       handleCellEditCancel();
     }
   };
@@ -498,7 +586,7 @@ const DefectSheetPage = () => {
 
   const handleSelectAll = () => {
     if (items.length > 0) {
-      const allIds = items.map(item => item.id);
+      const allIds = items.map((item) => item.id);
       setSelectedItems(allIds);
     }
   };
@@ -509,21 +597,31 @@ const DefectSheetPage = () => {
 
   // ========== РЕДАКТИРУЕМЫЕ КОЛОНКИ ==========
   const renderEditableCell = (params) => {
-    const { id, field, value } = params;
-    const isEditing = editCell && editCell.id === id && editCell.field === field;
+    const { id, field, value, row } = params;
+    const isEditing =
+      editCell && editCell.id === id && editCell.field === field;
 
     if (isEditing) {
       return (
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+        <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
           <TextField
             size="small"
-            defaultValue={value}
+            defaultValue={row[field]} // Используем исходное значение из row, а не отформатированное
             autoFocus
             onBlur={(e) => handleCellEditSave(id, field, e.target.value)}
             onKeyDown={(e) => handleCellEditKeyDown(e, id, field)}
-            sx={{ width: '100%' }}
+            sx={{ width: "100%" }}
           />
-          <IconButton size="small" onClick={() => handleCellEditSave(id, field, document.getElementById(`edit-${id}-${field}`)?.value)}>
+          <IconButton
+            size="small"
+            onClick={() =>
+              handleCellEditSave(
+                id,
+                field,
+                document.getElementById(`edit-${id}-${field}`)?.value,
+              )
+            }
+          >
             <CheckIcon fontSize="small" />
           </IconButton>
           <IconButton size="small" onClick={handleCellEditCancel}>
@@ -533,15 +631,41 @@ const DefectSheetPage = () => {
       );
     }
 
+    // Для отображения используем форматированное значение
+    let displayValue = value;
+
+    // Если это числовое поле, форматируем его
+    if (field === "requested_quantity" || field === "weight_tons") {
+      displayValue = value ? Number(value).toFixed(3) : "-";
+    } else if (field === "calculated_meters") {
+      displayValue = value ? Number(value).toFixed(2) : "-";
+    } else {
+      displayValue = value || "-";
+    }
+
     return (
-      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <Typography variant="body2">
-          {value || '-'}
+      <Box
+        sx={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          width: "100%",
+        }}
+      >
+        <Typography
+          variant="body2"
+          sx={{
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+          }}
+        >
+          {displayValue}
         </Typography>
-        <IconButton 
-          size="small" 
-          onClick={() => handleCellEditStart(id, field, value)}
-          sx={{ opacity: 0.5, '&:hover': { opacity: 1 } }}
+        <IconButton
+          size="small"
+          onClick={() => handleCellEditStart(id, field, row[field])} // Передаем исходное значение
+          sx={{ opacity: 0.5, "&:hover": { opacity: 1 } }}
         >
           <EditIcon fontSize="small" />
         </IconButton>
@@ -549,23 +673,333 @@ const DefectSheetPage = () => {
     );
   };
 
+  // ========== ЭКСПОРТ В ФОРМАТЕ ДЕФЕКТНОЙ ВЕДОМОСТИ ==========
+  const handleExportToDefectFormat = () => {
+    if (!items.length) {
+      showNotification("Нет данных для экспорта", "warning");
+      return;
+    }
+
+    try {
+      // Группируем строки по требованиям (по дате или другому признаку)
+      const groupedByRequirement = items.reduce((acc, item) => {
+        const requirementKey =
+          item.requirement_date || item.requirement_number || "Без даты";
+        if (!acc[requirementKey]) {
+          acc[requirementKey] = [];
+        }
+        acc[requirementKey].push(item);
+        return acc;
+      }, {});
+
+      // Заголовки для формата как в документе
+      const headers = [
+        "№ п/п",
+        "Дата требования",
+        "Марка/Адрес",
+        "Наименование работ",
+        "Наименование материалов",
+      ];
+
+      // Создаем структуру данных для экспорта
+      const exportData = [];
+
+      // Добавляем заголовок документа
+      exportData.push(["Дефектная ведомость"]);
+      exportData.push([`За период: ${new Date().toLocaleDateString("ru-RU")}`]);
+      exportData.push([]);
+
+      // Добавляем основные заголовки
+      exportData.push(headers);
+
+      let position = 1;
+
+      // Обрабатываем каждое требование
+      Object.entries(groupedByRequirement).forEach(
+        ([requirementDate, requirementItems]) => {
+          // Добавляем строку с номером требования
+          exportData.push([`Требование: ${requirementDate}`, "", "", "", ""]);
+
+          // Добавляем пустую строку после номера требования
+          exportData.push(["", "", "", "", ""]);
+
+          // Добавляем элементы требования
+          requirementItems.forEach((item, index) => {
+            exportData.push([
+              index === 0 ? position.toString() : "",
+              item.requirement_date || "",
+              item.address || "",
+              item.address || "", // В колонку "Наименование работ" дублируем адрес
+              item.material_name || "",
+            ]);
+          });
+
+          // Добавляем пустые строки после требования
+          exportData.push(["", "", "", "", ""]);
+          exportData.push(["", "", "", "", ""]);
+
+          position++;
+        },
+      );
+
+      // Создаем XLS файл
+      const xlsContent = exportData
+        .map((row) =>
+          row
+            .map((cell) => `"${String(cell || "").replace(/"/g, '""')}"`)
+            .join("\t"),
+        )
+        .join("\n");
+
+      const blob = new Blob(["\uFEFF" + xlsContent], {
+        type: "application/vnd.ms-excel;charset=utf-8",
+      });
+
+      const fileName = `defect_sheet_${batchId ? batchId.slice(0, 8) : "temp"}_${new Date().toISOString().slice(0, 10)}.xls`;
+
+      const link = document.createElement("a");
+      const url = URL.createObjectURL(blob);
+
+      link.href = url;
+      link.download = fileName;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+
+      showNotification(`Экспортировано ${items.length} строк`, "success");
+    } catch (error) {
+      console.error("Ошибка при экспорте:", error);
+      showNotification(`Ошибка при экспорте: ${error.message}`, "error");
+    }
+  };
+
+  // ========== ЭКСПОРТ В ПРОСТОЙ XLS ==========
+  const handleExportToExcel = () => {
+    if (!items.length) {
+      showNotification("Нет данных для экспорта", "warning");
+      return;
+    }
+
+    try {
+      // Заголовки
+      const headers = [
+        "№ п/п",
+        "Марка (Адрес)",
+        "Наименование материала",
+        "Затреб (тонн)",
+        "Вес (тонн)",
+        "Тип профиля",
+        "Параметры",
+        "Пересчитано (метров)",
+        "Формула",
+        "Статус",
+      ];
+
+      // Данные
+      const dataRows = items.map((item) => {
+        const status = item.is_calculated ? "✓ Пересчитано" : "Ожидает";
+
+        return [
+          item.position || "",
+          item.address || "",
+          item.material_name || "",
+          item.requested_quantity
+            ? Number(item.requested_quantity).toFixed(3)
+            : "",
+          item.weight_tons ? Number(item.weight_tons).toFixed(3) : "",
+          item.profile_type || "",
+          item.profile_params ? JSON.stringify(item.profile_params) : "",
+          item.calculated_meters
+            ? Number(item.calculated_meters).toFixed(2)
+            : "",
+          item.formula_used || "",
+          status,
+        ];
+      });
+
+      // Заголовок с информацией
+      const title = [
+        ["Дефектная ведомость"],
+        [`Экспортировано: ${new Date().toLocaleString("ru-RU")}`],
+        [`Всего строк: ${items.length}`],
+        [`Batch ID: ${batchId || "не указан"}`],
+        [`Sheet ID: ${sheetId || "не указан"}`],
+        [],
+      ];
+
+      // Собираем весь контент
+      const fullContent = [...title, headers, ...dataRows];
+
+      // Создаем XLS файл (фактически TSV - табулированный текст)
+      const xlsContent = fullContent
+        .map((row) =>
+          row
+            .map((cell) => `"${String(cell || "").replace(/"/g, '""')}"`)
+            .join("\t"),
+        )
+        .join("\n");
+
+      // Создаем blob с BOM для правильной кодировки
+      const blob = new Blob(["\uFEFF" + xlsContent], {
+        type: "application/vnd.ms-excel;charset=utf-8",
+      });
+
+      // Генерируем имя файла
+      const fileName = `defect_sheet_simple_${batchId ? batchId.slice(0, 8) : "temp"}_${new Date().toISOString().slice(0, 10)}.xls`;
+
+      // Скачиваем файл
+      const link = document.createElement("a");
+      const url = URL.createObjectURL(blob);
+
+      link.href = url;
+      link.download = fileName;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+
+      showNotification(`Экспортировано ${items.length} строк в XLS`, "success");
+    } catch (error) {
+      console.error("Ошибка при экспорте в XLS:", error);
+      showNotification(`Ошибка при экспорте: ${error.message}`, "error");
+    }
+  };
+
+  // ========== ЭКСПОРТ В CSV ==========
+  const handleExportToCSV = () => {
+    if (!items.length) {
+      showNotification("Нет данных для экспорта", "warning");
+      return;
+    }
+
+    try {
+      // Заголовки
+      const headers = [
+        "№ п/п",
+        "Марка (Адрес)",
+        "Наименование материала",
+        "Затреб (тонн)",
+        "Вес (тонн)",
+        "Тип профиля",
+        "Параметры",
+        "Пересчитано (метров)",
+        "Формула",
+        "Статус",
+      ].join(";");
+
+      // Данные
+      const dataRows = items.map((item) => {
+        const status = item.is_calculated ? "✓ Пересчитано" : "Ожидает";
+
+        return [
+          `"${(item.position || "").replace(/"/g, '""')}"`,
+          `"${(item.address || "").replace(/"/g, '""')}"`,
+          `"${(item.material_name || "").replace(/"/g, '""')}"`,
+          item.requested_quantity
+            ? Number(item.requested_quantity).toFixed(3)
+            : "",
+          item.weight_tons ? Number(item.weight_tons).toFixed(3) : "",
+          `"${(item.profile_type || "").replace(/"/g, '""')}"`,
+          `"${(item.profile_params ? JSON.stringify(item.profile_params) : "").replace(/"/g, '""')}"`,
+          item.calculated_meters
+            ? Number(item.calculated_meters).toFixed(2)
+            : "",
+          `"${(item.formula_used || "").replace(/"/g, '""')}"`,
+          `"${status.replace(/"/g, '""')}"`,
+        ].join(";");
+      });
+
+      // Собираем CSV
+      const csvContent = [headers, ...dataRows].join("\n");
+
+      // Создаем blob
+      const blob = new Blob(["\uFEFF" + csvContent], {
+        type: "text/csv;charset=utf-8;",
+      });
+
+      // Генерируем имя файла
+      const fileName = `defect_sheet_${batchId ? batchId.slice(0, 8) : "temp"}_${new Date().toISOString().slice(0, 10)}.csv`;
+
+      // Скачиваем файл
+      const link = document.createElement("a");
+      const url = URL.createObjectURL(blob);
+
+      link.href = url;
+      link.download = fileName;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+
+      showNotification(`Экспортировано ${items.length} строк в CSV`, "success");
+    } catch (error) {
+      console.error("Ошибка при экспорте в CSV:", error);
+      showNotification(`Ошибка при экспорте: ${error.message}`, "error");
+    }
+  };
+
+
+
+  // // ========== РЕДАКТИРУЕМЫЕ КОЛОНКИ ==========
+  // const renderEditableCell = (params) => {
+  //   const { id, field, value } = params;
+  //   const isEditing = editCell && editCell.id === id && editCell.field === field;
+
+  //   if (isEditing) {
+  //     return (
+  //       <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+  //         <TextField
+  //           size="small"
+  //           defaultValue={value}
+  //           autoFocus
+  //           onBlur={(e) => handleCellEditSave(id, field, e.target.value)}
+  //           onKeyDown={(e) => handleCellEditKeyDown(e, id, field)}
+  //           sx={{ width: '100%' }}
+  //         />
+  //         <IconButton size="small" onClick={() => handleCellEditSave(id, field, document.getElementById(`edit-${id}-${field}`)?.value)}>
+  //           <CheckIcon fontSize="small" />
+  //         </IconButton>
+  //         <IconButton size="small" onClick={handleCellEditCancel}>
+  //           <CloseIcon fontSize="small" />
+  //         </IconButton>
+  //       </Box>
+  //     );
+  //   }
+
+  //   return (
+  //     <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+  //       <Typography variant="body2">
+  //         {value || '-'}
+  //       </Typography>
+  //       <IconButton
+  //         size="small"
+  //         onClick={() => handleCellEditStart(id, field, value)}
+  //         sx={{ opacity: 0.5, '&:hover': { opacity: 1 } }}
+  //       >
+  //         <EditIcon fontSize="small" />
+  //       </IconButton>
+  //     </Box>
+  //   );
+  // };
+
   // ========== КОЛОНКИ С РЕДАКТИРОВАНИЕМ И УДАЛЕНИЕМ ==========
   const columns = [
-    { 
-      field: "id", 
-      headerName: "ID", 
+    {
+      field: "id",
+      headerName: "ID",
       width: 70,
-      type: 'number',
+      type: "number",
     },
-    { 
-      field: "position", 
-      headerName: "№", 
+    {
+      field: "position",
+      headerName: "№",
       width: 70,
-      type: 'number',
+      type: "number",
     },
-    { 
-      field: "address", 
-      headerName: "Адрес (Марка)", 
+    {
+      field: "address",
+      headerName: "Адрес (Марка)",
       width: 200,
       renderCell: (params) => renderEditableCell(params),
     },
@@ -580,20 +1014,14 @@ const DefectSheetPage = () => {
       headerName: "Затреб (тонн)",
       width: 120,
       type: "number",
-      renderCell: (params) => {
-        const value = params.value ? Number(params.value).toFixed(3) : "-";
-        return renderEditableCell({ ...params, value });
-      },
+      renderCell: (params) => renderEditableCell(params), // Убрали форматирование здесь, оно будет в renderEditableCell
     },
     {
       field: "weight_tons",
       headerName: "Вес (тонн)",
       width: 120,
       type: "number",
-      renderCell: (params) => {
-        const value = params.value ? Number(params.value).toFixed(3) : "-";
-        return renderEditableCell({ ...params, value });
-      },
+      renderCell: (params) => renderEditableCell(params), // Убрали форматирование здесь
     },
     {
       field: "calculated_meters",
@@ -601,7 +1029,9 @@ const DefectSheetPage = () => {
       width: 180,
       type: "number",
       renderCell: (params) => (
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, width: '100%' }}>
+        <Box
+          sx={{ display: "flex", alignItems: "center", gap: 1, width: "100%" }}
+        >
           {params.value ? (
             <Chip
               label={Number(params.value).toFixed(2)}
@@ -610,17 +1040,19 @@ const DefectSheetPage = () => {
               variant="outlined"
             />
           ) : (
-            <Typography variant="body2" color="textSecondary">-</Typography>
+            <Typography variant="body2" color="textSecondary">
+              -
+            </Typography>
           )}
           <Tooltip title="Открыть калькулятор">
-            <IconButton 
+            <IconButton
               size="small"
               color="primary"
               onClick={() => {
-                const item = items.find(i => i.id === params.id);
+                const item = items.find((i) => i.id === params.id);
                 setSimpleCalculatorOpen({
                   open: true,
-                  item: item
+                  item: item,
                 });
               }}
             >
@@ -630,15 +1062,15 @@ const DefectSheetPage = () => {
         </Box>
       ),
     },
-    { 
-      field: "profile_type", 
-      headerName: "Тип", 
+    {
+      field: "profile_type",
+      headerName: "Тип",
       width: 100,
       renderCell: (params) => {
         const profile = PROFILE_TYPES[params.value];
         return (
           <Chip
-            label={profile?.icon || params.value || 'Не выбран'}
+            label={profile?.icon || params.value || "Не выбран"}
             size="small"
             variant="outlined"
           />
@@ -664,10 +1096,10 @@ const DefectSheetPage = () => {
       sortable: false,
       filterable: false,
       renderCell: (params) => (
-        <Box sx={{ display: 'flex', gap: 0.5 }}>
+        <Box sx={{ display: "flex", gap: 0.5 }}>
           <Tooltip title="Удалить строку">
-            <IconButton 
-              size="small" 
+            <IconButton
+              size="small"
               color="error"
               onClick={() => handleDeleteClick(params.id)}
             >
@@ -712,13 +1144,24 @@ const DefectSheetPage = () => {
       ) : (
         <Box>
           <Paper sx={{ p: 2, mb: 2 }}>
-            <Box sx={{ display: "flex", gap: 2, alignItems: "center", flexWrap: "wrap" }}>
+            <Box
+              sx={{
+                display: "flex",
+                gap: 2,
+                alignItems: "center",
+                flexWrap: "wrap",
+              }}
+            >
               <Typography variant="subtitle1">Batch ID: {batchId}</Typography>
               <Chip
                 label={processing ? "Обработка..." : "Готово"}
                 color={processing ? "warning" : "success"}
               />
-              <Chip label={`Записей: ${items.length}`} color="info" variant="outlined" />
+              <Chip
+                label={`Записей: ${items.length}`}
+                color="info"
+                variant="outlined"
+              />
               <Chip
                 label={`Выбрано: ${selectedItems.length}`}
                 color={selectedItems.length > 0 ? "primary" : "default"}
@@ -743,7 +1186,7 @@ const DefectSheetPage = () => {
               >
                 Выбрать первый
               </Button>
-              
+
               <Button
                 variant="outlined"
                 color="warning"
@@ -753,7 +1196,7 @@ const DefectSheetPage = () => {
               >
                 Выбрать все
               </Button>
-              
+
               <Button
                 variant="outlined"
                 color="warning"
@@ -781,7 +1224,9 @@ const DefectSheetPage = () => {
                 variant="contained"
                 color="secondary"
                 startIcon={<CalculatorIcon />}
-                onClick={() => setSimpleCalculatorOpen({ open: true, item: null })}
+                onClick={() =>
+                  setSimpleCalculatorOpen({ open: true, item: null })
+                }
               >
                 Калькулятор
               </Button>
@@ -818,8 +1263,28 @@ const DefectSheetPage = () => {
                 variant="outlined"
                 color="secondary"
                 startIcon={<DownloadIcon />}
-                onClick={handleExport}
-                disabled={items.length === 0}
+                onClick={() => {
+                  const useFormatted = window.confirm(
+                    "Выберите формат экспорта:\n\n" +
+                      "OK - Форматированный Excel (с ячейками)\n" +
+                      "Отмена - Простой XLS",
+                  );
+
+                  if (useFormatted) {
+                    handleExportFormattedExcel();
+                  } else {
+                    // Старый простой экспорт
+                    const useOldFormat = window.confirm(
+                      "OK - XLS (старый Excel 97-2003)\n" + "Отмена - CSV",
+                    );
+                    if (useOldFormat) {
+                      handleExportToExcel();
+                    } else {
+                      handleExportToCSV();
+                    }
+                  }
+                }}
+                disabled={items.length === 0 || processing}
               >
                 Экспорт
               </Button>
@@ -845,8 +1310,8 @@ const DefectSheetPage = () => {
                 toolbar: GridToolbar,
               }}
               sx={{
-                '& .MuiDataGrid-cell:focus-within': {
-                  outline: 'none',
+                "& .MuiDataGrid-cell:focus-within": {
+                  outline: "none",
                 },
               }}
             />
@@ -855,15 +1320,16 @@ const DefectSheetPage = () => {
       )}
 
       {/* Диалог подтверждения удаления */}
-      <Dialog open={deleteDialogOpen} onClose={() => setDeleteDialogOpen(false)}>
-        <DialogTitle>
-          Подтверждение удаления
-        </DialogTitle>
+      <Dialog
+        open={deleteDialogOpen}
+        onClose={() => setDeleteDialogOpen(false)}
+      >
+        <DialogTitle>Подтверждение удаления</DialogTitle>
         <DialogContent>
           <Typography>
-            {itemToDelete === 'selected' 
+            {itemToDelete === "selected"
               ? `Вы уверены, что хотите удалить ${selectedItems.length} выбранных строк?`
-              : 'Вы уверены, что хотите удалить эту строку?'}
+              : "Вы уверены, что хотите удалить эту строку?"}
           </Typography>
         </DialogContent>
         <DialogActions>
@@ -899,9 +1365,7 @@ const DefectSheetPage = () => {
         autoHideDuration={6000}
         onClose={() => setNotification({ ...notification, open: false })}
       >
-        <Alert severity={notification.severity}>
-          {notification.message}
-        </Alert>
+        <Alert severity={notification.severity}>{notification.message}</Alert>
       </Snackbar>
     </Box>
   );

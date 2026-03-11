@@ -1675,14 +1675,13 @@ def save_defect_sheet(
         "message": "Дефектная ведомость сохранена"
     }
 
-
 @app.post("/api/defect/export")
 async def export_defect_sheet(
     request: ExportRequest,
     db: Session = Depends(get_db)
 ):
     """
-    Экспорт дефектной ведомости в Excel с результатами пересчета
+    Экспорт дефектной ведомости в Excel (старый формат .xls)
     """
     sheet = get_defect_sheet(db, request.sheet_id)
     if not sheet:
@@ -1690,44 +1689,284 @@ async def export_defect_sheet(
     
     items = get_defect_sheet_items(db, request.sheet_id)
     
-    # Создаем Excel файл с результатами
-    import pandas as pd
+    print(f"📊 Exporting {len(items)} items to .xls format")
+    
+    import xlwt
     from io import BytesIO
     from fastapi.responses import StreamingResponse
+    from datetime import datetime
     
-    # Подготавливаем данные для экспорта
-    data = []
-    for item in items:
-        data.append({
-            "№ п/п": item.position,
-            "Марка (Адрес)": item.address,
-            "Наименование материала": item.material_name,
-            "Затреб (тонн)": float(item.requested_quantity) if item.requested_quantity else None,
-            "Вес (тонн)": float(item.weight_tons) if item.weight_tons else None,
-            "Тип профиля": item.profile_type,
-            "Параметры": str(item.profile_params) if item.profile_params else "",
-            "Пересчитано (метров)": float(item.calculated_meters) if item.calculated_meters else None,
-            "Формула": item.formula_used,
-            "Статус": "✓" if item.is_calculated else ""
-        })
+    # Создаем workbook
+    workbook = xlwt.Workbook(encoding='utf-8')
+    worksheet = workbook.add_sheet('Дефектная ведомость')
     
-    df = pd.DataFrame(data)
+    # Стили
+    header_style = xlwt.XFStyle()
+    header_font = xlwt.Font()
+    header_font.bold = True
+    header_font.colour_index = 1  # белый
+    header_font.height = 200  # 10pt * 20
     
-    # Создаем буфер для Excel
+    header_pattern = xlwt.Pattern()
+    header_pattern.pattern = xlwt.Pattern.SOLID_PATTERN
+    header_pattern.pattern_fore_colour = 5  # синий
+    
+    header_style.font = header_font
+    header_style.pattern = header_pattern
+    header_style.alignment.horz = xlwt.Alignment.HORZ_CENTER
+    
+    # Заголовки
+    headers = [
+        "№ п/п", "Марка (Адрес)", "Наименование материала",
+        "Затреб (тонн)", "Вес (тонн)", "Тип профиля",
+        "Параметры", "Пересчитано (метров)", "Формула", "Статус"
+    ]
+    
+    # Записываем заголовки
+    for col, header in enumerate(headers):
+        worksheet.write(0, col, header, header_style)
+        # Устанавливаем ширину колонки (1 единица = 1/256 символа)
+        worksheet.col(col).width = 256 * 20  # 20 символов
+    
+    # Увеличиваем ширину для длинных колонок
+    worksheet.col(2).width = 256 * 50  # Наименование материала
+    worksheet.col(1).width = 256 * 25  # Марка
+    worksheet.col(8).width = 256 * 30  # Формула
+    
+    # Стиль для чисел
+    number_style = xlwt.XFStyle()
+    number_style.num_format_str = '#,##0.000'
+    number_style.alignment.horz = xlwt.Alignment.HORZ_RIGHT
+    
+    number_style_2dec = xlwt.XFStyle()
+    number_style_2dec.num_format_str = '#,##0.00'
+    number_style_2dec.alignment.horz = xlwt.Alignment.HORZ_RIGHT
+    
+    # Стиль для текста
+    text_style = xlwt.XFStyle()
+    text_style.alignment.horz = xlwt.Alignment.HORZ_LEFT
+    
+    # Стиль для статуса
+    status_style = xlwt.XFStyle()
+    status_style.alignment.horz = xlwt.Alignment.HORZ_CENTER
+    
+    # Записываем данные
+    row_count = 0
+    for row, item in enumerate(items, start=1):
+        try:
+            # Основные поля
+            worksheet.write(row, 0, item.position or "", text_style)
+            worksheet.write(row, 1, item.address or "", text_style)
+            worksheet.write(row, 2, item.material_name or "", text_style)
+            
+            # Числовые значения
+            if item.requested_quantity:
+                worksheet.write(row, 3, float(item.requested_quantity), number_style)
+            else:
+                worksheet.write(row, 3, "", text_style)
+                
+            if item.weight_tons:
+                worksheet.write(row, 4, float(item.weight_tons), number_style)
+            else:
+                worksheet.write(row, 4, "", text_style)
+            
+            worksheet.write(row, 5, item.profile_type or "", text_style)
+            worksheet.write(row, 6, str(item.profile_params) if item.profile_params else "", text_style)
+            
+            if item.calculated_meters:
+                worksheet.write(row, 7, float(item.calculated_meters), number_style_2dec)
+            else:
+                worksheet.write(row, 7, "", text_style)
+            
+            worksheet.write(row, 8, item.formula_used or "", text_style)
+            
+            status = "✓ Пересчитано" if item.is_calculated else "Ожидает"
+            worksheet.write(row, 9, status, status_style)
+            
+            row_count += 1
+            
+        except Exception as e:
+            print(f"❌ Error writing row {row}: {e}")
+            continue
+    
+    print(f"✅ Rows written: {row_count}")
+    
+    # Сохраняем в буфер
     output = BytesIO()
-    with pd.ExcelWriter(output, engine='openpyxl') as writer:
-        df.to_excel(writer, sheet_name='Дефектная ведомость', index=False)
-    
+    workbook.save(output)
     output.seek(0)
     
-    filename = f"defect_sheet_{sheet.batch_id}_{datetime.now().strftime('%Y%m%d')}.xlsx"
+    file_size = len(output.getvalue())
+    print(f"✅ Excel .xls file created: {file_size} bytes")
+    
+    filename = f"defect_sheet_{sheet.batch_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xls"
+    
+    return StreamingResponse(
+        output,
+        media_type="application/vnd.ms-excel",
+        headers={
+            "Content-Disposition": f"attachment; filename={filename}",
+            "Access-Control-Expose-Headers": "Content-Disposition"
+        }
+    )
+
+
+@app.post("/api/defect/export-excel")
+async def export_defect_sheet_excel(
+    request: ExportRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    Экспорт дефектной ведомости в форматированный Excel
+    """
+    sheet = get_defect_sheet(db, request.sheet_id)
+    if not sheet:
+        raise HTTPException(404, "Дефектная ведомость не найдена")
+    
+    items = get_defect_sheet_items(db, request.sheet_id)
+    
+    print(f"📊 Exporting {len(items)} items to formatted Excel")
+    
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    from io import BytesIO
+    from fastapi.responses import StreamingResponse
+    from datetime import datetime
+    
+    # Создаем workbook
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Дефектная ведомость"
+    
+    # Стили
+    title_font = Font(name='Arial', size=14, bold=True)
+    header_font = Font(name='Arial', size=11, bold=True)
+    
+    # Заливка для заголовков
+    header_fill = PatternFill(start_color="366092", end_color="366092", fill_type="solid")
+    
+    # Границы
+    thin_border = Border(
+        left=Side(style='thin'),
+        right=Side(style='thin'),
+        top=Side(style='thin'),
+        bottom=Side(style='thin')
+    )
+    
+    # Выравнивание
+    center_alignment = Alignment(horizontal='center', vertical='center')
+    left_alignment = Alignment(horizontal='left', vertical='center', wrap_text=True)
+    
+    # Заголовок документа
+    ws.merge_cells('A1:E1')
+    cell = ws['A1']
+    cell.value = "Дефектная ведомость"
+    cell.font = title_font
+    cell.alignment = center_alignment
+    
+    # Период
+    ws.merge_cells('A2:E2')
+    cell = ws['A2']
+    cell.value = f"За период: {datetime.now().strftime('%d.%m.%Y')}"
+    cell.alignment = center_alignment
+    
+    # Пустая строка
+    ws.row_dimensions[3].height = 15
+    
+    # Заголовки таблицы
+    headers = ["№ п/п", "Дата требования", "Марка/Адрес", "Наименование работ", "Наименование материалов"]
+    for col, header in enumerate(headers, 1):
+        cell = ws.cell(row=4, column=col, value=header)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.border = thin_border
+        cell.alignment = center_alignment
+    
+    # Группируем по датам требований
+    grouped_items = {}
+    for item in items:
+        date_key = item.requirement_date or datetime.now().date()
+        if date_key not in grouped_items:
+            grouped_items[date_key] = []
+        grouped_items[date_key].append(item)
+    
+    current_row = 5
+    position = 1
+    
+    for date_key, requirement_items in grouped_items.items():
+        # Строка с номером требования
+        cell = ws.cell(row=current_row, column=1, value=f"Требование: {date_key}")
+        cell.font = Font(bold=True)
+        ws.merge_cells(f'A{current_row}:E{current_row}')
+        current_row += 1
+        
+        # Пустая строка
+        current_row += 1
+        
+        # Строки требования
+        for idx, item in enumerate(requirement_items):
+            # № п/п (только для первой строки требования)
+            if idx == 0:
+                cell = ws.cell(row=current_row, column=1, value=position)
+                cell.border = thin_border
+            else:
+                cell = ws.cell(row=current_row, column=1, value="")
+                cell.border = thin_border
+            
+            # Дата требования
+            cell = ws.cell(row=current_row, column=2, value=item.requirement_date or "")
+            cell.border = thin_border
+            cell.alignment = center_alignment
+            
+            # Марка/Адрес
+            cell = ws.cell(row=current_row, column=3, value=item.address or "")
+            cell.border = thin_border
+            cell.alignment = left_alignment
+            
+            # Наименование работ (копируем адрес как в примере)
+            cell = ws.cell(row=current_row, column=4, value=item.address or "")
+            cell.border = thin_border
+            cell.alignment = left_alignment
+            
+            # Наименование материалов
+            cell = ws.cell(row=current_row, column=5, value=item.material_name or "")
+            cell.border = thin_border
+            cell.alignment = left_alignment
+            
+            current_row += 1
+        
+        # Две пустые строки после требования
+        current_row += 2
+        position += 1
+    
+    # Устанавливаем ширину колонок
+    ws.column_dimensions['A'].width = 10  # № п/п
+    ws.column_dimensions['B'].width = 15  # Дата требования
+    ws.column_dimensions['C'].width = 25  # Марка/Адрес
+    ws.column_dimensions['D'].width = 30  # Наименование работ
+    ws.column_dimensions['E'].width = 50  # Наименование материалов
+    
+    # Добавляем границы для всей таблицы
+    for row in ws.iter_rows(min_row=4, max_row=current_row-1, min_col=1, max_col=5):
+        for cell in row:
+            if not cell.border:
+                cell.border = thin_border
+    
+    # Сохраняем в буфер
+    output = BytesIO()
+    wb.save(output)
+    output.seek(0)
+    
+    filename = f"defect_sheet_{sheet.batch_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
     
     return StreamingResponse(
         output,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": f"attachment; filename={filename}"}
+        headers={
+            "Content-Disposition": f"attachment; filename={filename}",
+            "Access-Control-Expose-Headers": "Content-Disposition"
+        }
     )
-
 
 @app.delete("/api/defect/{sheet_id}")
 def delete_defect_sheet_endpoint(
