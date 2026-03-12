@@ -1,4 +1,4 @@
-
+// frontend/src/services/api.js
 
 const API_BASE_URL = 'http://localhost:8000';
 
@@ -56,49 +56,72 @@ class ApiService {
     return response.json();
   }
 
-  //  Метод для создания новой строки дефектной ведомости 
+  async patch(endpoint, data) {
+    console.log(`📤 PATCH: ${API_BASE_URL}${endpoint}`);
+    const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(data),
+    });
+    
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      throw new Error(error.detail || `HTTP error! status: ${response.status}`);
+    }
+    
+    return response.json();
+  }
+
+  // Метод для создания новой строки дефектной ведомости
   async createDefectItem(data) {
     return this.post('/api/defect/items', data);
   }
 
-  //  Метод для удаления строки 
+  // Метод для удаления строки
   async deleteDefectItem(itemId) {
     return this.delete(`/api/defect/items/${itemId}`);
   }
 
-  //  Метод для массового удаления 
+  // Метод для массового удаления
   async batchDeleteDefectItems(itemIds) {
     return this.post('/api/defect/items/batch-delete', { item_ids: itemIds });
   }
 
-  //  Метод для загрузки дефектной ведомости 
+  // Метод для загрузки дефектной ведомости
   async uploadDefectSheet(formData) {
     return this.post('/api/defect/upload', formData);
   }
 
-  //  Метод для получения строк дефектной ведомости 
+  // Метод для получения строк дефектной ведомости
   async getDefectItems(sheetId) {
     return this.get(`/api/defect/${sheetId}/items`);
   }
 
-  //  Метод для пересчета 
+  // Метод для пересчета
   async calculateDefectItems(data) {
     return this.post('/api/defect/calculate', data);
   }
 
-  //  Метод для сохранения 
+  // Метод для сохранения
   async saveDefectSheet(sheetId) {
     return this.post('/api/defect/save', { sheet_id: sheetId });
   }
 
-  //  Метод для экспорта в Excel 
+  // Метод для экспорта в Excel
   async exportDefectSheet(sheetId, format = 'excel') {
     return this.post('/api/defect/export', { sheet_id: sheetId, format }, { responseType: 'blob' });
   }
 
-  //  Метод для экспорта в форматированный Excel 
+  // Метод для экспорта в форматированный Excel
   async exportDefectSheetFormatted(sheetId) {
     return this.post('/api/defect/export-excel', { sheet_id: sheetId }, { responseType: 'blob' });
+  }
+
+  // Метод для обновления поля строки
+  async updateDefectItemField(itemId, field, value) {
+    return this.patch(`/api/defect/items/${itemId}`, { field, value });
   }
 }
 

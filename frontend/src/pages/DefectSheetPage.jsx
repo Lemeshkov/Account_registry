@@ -37,6 +37,7 @@ import { useWebSocket } from "../hooks/useWebSocket";
 import DefectSheetUploader from "../components/DefectSheetUploader";
 import MetalCalculatorModal from "../components/MetalCalculatorModal";
 import SimpleCalculatorModal from "../components/SimpleCalculatorModal";
+import EditCellModal from "../components/EditCellModal";
 import api from "../services/api";
 
 const PROFILE_TYPES = {
@@ -190,9 +191,10 @@ const DefectSheetPage = () => {
     pageSize: 10,
     page: 0,
   });
-  const [editCell, setEditCell] = useState(null);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [itemToDelete, setItemToDelete] = useState(null);
+  const [editModalOpen, setEditModalOpen] = useState(false);
+  const [editCellData, setEditCellData] = useState(null);
 
   const { lastMessage, connectionStatus } = useWebSocket(batchId);
 
@@ -208,7 +210,7 @@ const DefectSheetPage = () => {
       setLoading(true);
       console.log(`📥 Loading data for sheet: ${targetId}`);
 
-      const data = await api.get(`/api/defect/${targetId}/items`);
+      const data = await api.getDefectItems(targetId);
       console.log("📦 Received data:", data);
 
       if (data && data.items && Array.isArray(data.items)) {
@@ -216,7 +218,6 @@ const DefectSheetPage = () => {
         const itemsWithNumericIds = data.items.map((item) => ({
           ...item,
           id: Number(item.id),
-          isEditing: false,
         }));
         console.log("📦 Items with numeric IDs:", itemsWithNumericIds);
         setItems(itemsWithNumericIds);
@@ -225,7 +226,6 @@ const DefectSheetPage = () => {
         const itemsWithNumericIds = data.map((item) => ({
           ...item,
           id: Number(item.id),
-          isEditing: false,
         }));
         console.log(
           `✅ Setting ${itemsWithNumericIds.length} items from array`,
@@ -310,6 +310,7 @@ const DefectSheetPage = () => {
   const handleUploadSuccess = (newBatchId, newSheetId) => {
     console.log("📤 Upload success:", { newBatchId, newSheetId });
     setBatchId(newBatchId);
+    setSheetId(newSheetId);
     setProcessing(true);
     showNotification("Файл загружен, начинается обработка...", "info");
   };
@@ -334,7 +335,7 @@ const DefectSheetPage = () => {
         applyToAll,
       });
 
-      await api.post("/api/defect/calculate", {
+      await api.calculateDefectItems({
         sheet_id: sheetId,
         item_ids: selectedItems,
         profile_type: profileType,
@@ -349,75 +350,74 @@ const DefectSheetPage = () => {
 
   // ========== КАЛЬКУЛЯТОР ДЛЯ ОДНОЙ СТРОКИ ==========
   const handleSimpleCalculate = async (result) => {
-  try {
-    if (result.isNewRow) {
-      // Сохраняем новую строку в БД
-      setProcessing(true);
-      
-      const newItemData = {
-        sheet_id: sheetId,
-        position: parseInt(result.newRowData.position) || null,
-        address: result.newRowData.address || '',
-        material_name: result.newRowData.material_name,
-        requested_quantity: result.tons,
-        weight_tons: result.tons,
-        calculated_meters: result.meters,
-        profile_type: result.type,
-        profile_params: result.profile_params || {},
-        formula_used: result.formula,
-        is_calculated: true
-      };
-      
-      console.log("📤 Saving new item to DB:", newItemData);
-      
-      // Отправляем на сервер
-      const savedItem = await api.createDefectItem(newItemData);
-      console.log("✅ Item saved to DB:", savedItem);
-      
-      // Добавляем в локальное состояние с реальным ID из БД
-      setItems((prevItems) => [
-        ...prevItems,
-        {
-          ...savedItem,
-          id: savedItem.id, // Используем реальный ID из БД
-          isEditing: false,
-        }
-      ]);
-      
-      showNotification(
-        `Новая строка создана и сохранена: ${result.meters.toFixed(2)} м`,
-        "success"
-      );
-      
-      // Обновляем данные с сервера для синхронизации
-      setTimeout(() => loadSheetData(sheetId), 500);
-      
-    } else {
-      // Обновляем существующую строку (уже есть в БД)
-      setItems((prevItems) =>
-        prevItems.map((item) =>
-          item.id === result.id
-            ? {
-                ...item,
-                calculated_meters: result.meters,
-                profile_type: result.profileType,
-                is_calculated: true,
-                formula_used: result.formula,
-                weight_tons: result.weightTons || item.weight_tons,
-                requested_quantity: result.weightTons || item.requested_quantity,
-              }
-            : item,
-        ),
-      );
-      showNotification(`Строка пересчитана: ${result.meters.toFixed(2)} м`, "success");
+    try {
+      if (result.isNewRow) {
+        // Сохраняем новую строку в БД
+        setProcessing(true);
+        
+        const newItemData = {
+          sheet_id: sheetId,
+          position: parseInt(result.newRowData.position) || null,
+          address: result.newRowData.address || '',
+          material_name: result.newRowData.material_name,
+          requested_quantity: result.tons,
+          weight_tons: result.tons,
+          calculated_meters: result.meters,
+          profile_type: result.type,
+          profile_params: result.profile_params || {},
+          formula_used: result.formula,
+          is_calculated: true
+        };
+        
+        console.log("📤 Saving new item to DB:", newItemData);
+        
+        // Отправляем на сервер
+        const savedItem = await api.createDefectItem(newItemData);
+        console.log("✅ Item saved to DB:", savedItem);
+        
+        // Добавляем в локальное состояние с реальным ID из БД
+        setItems((prevItems) => [
+          ...prevItems,
+          {
+            ...savedItem,
+            id: savedItem.id,
+          }
+        ]);
+        
+        showNotification(
+          `Новая строка создана и сохранена: ${result.meters.toFixed(2)} м`,
+          "success"
+        );
+        
+        // Обновляем данные с сервера для синхронизации
+        setTimeout(() => loadSheetData(sheetId), 500);
+        
+      } else {
+        // Обновляем существующую строку (уже есть в БД)
+        setItems((prevItems) =>
+          prevItems.map((item) =>
+            item.id === result.id
+              ? {
+                  ...item,
+                  calculated_meters: result.meters,
+                  profile_type: result.profileType,
+                  is_calculated: true,
+                  formula_used: result.formula,
+                  weight_tons: result.weightTons || item.weight_tons,
+                  requested_quantity: result.weightTons || item.requested_quantity,
+                }
+              : item,
+          ),
+        );
+        showNotification(`Строка пересчитана: ${result.meters.toFixed(2)} м`, "success");
+      }
+    } catch (error) {
+      console.error("❌ Error saving item:", error);
+      showNotification(`Ошибка при сохранении: ${error.message}`, "error");
+    } finally {
+      setProcessing(false);
     }
-  } catch (error) {
-    console.error("❌ Error saving item:", error);
-    showNotification(`Ошибка при сохранении: ${error.message}`, "error");
-  } finally {
-    setProcessing(false);
-  }
-};
+  };
 
   // ========== УДАЛЕНИЕ СТРОК ==========
   const handleDeleteClick = (id) => {
@@ -434,58 +434,51 @@ const DefectSheetPage = () => {
     setDeleteDialogOpen(true);
   };
 
-  // frontend/src/pages/DefectSheetPage.jsx - обновите confirmDelete
-
-const confirmDelete = async () => {
-  try {
-    setProcessing(true);
-    
-    if (itemToDelete === "selected") {
-      // Удаляем выбранные строки по одной (или можно сделать batch delete)
-      for (const id of selectedItems) {
-        // Проверяем, что это реальный ID из БД (число), а не временный
-        if (typeof id === 'number' && id > 1000000) { // примерный порог
-          await api.delete(`/api/defect/items/${id}`);
+  const confirmDelete = async () => {
+    try {
+      setProcessing(true);
+      
+      if (itemToDelete === "selected") {
+        // Массовое удаление выбранных строк
+        if (selectedItems.length > 0) {
+          await api.batchDeleteDefectItems(selectedItems);
         }
+        
+        setItems((prevItems) =>
+          prevItems.filter((item) => !selectedItems.includes(item.id)),
+        );
+        setSelectedItems([]);
+        showNotification(`Удалено ${selectedItems.length} строк`, "success");
+      } else {
+        // Удаляем одну строку
+        await api.deleteDefectItem(itemToDelete);
+        
+        setItems((prevItems) =>
+          prevItems.filter((item) => item.id !== itemToDelete),
+        );
+        setSelectedItems((prev) => prev.filter((id) => id !== itemToDelete));
+        showNotification("Строка удалена", "success");
       }
       
-      setItems((prevItems) =>
-        prevItems.filter((item) => !selectedItems.includes(item.id)),
-      );
-      setSelectedItems([]);
-      showNotification(`Удалено ${selectedItems.length} строк`, "success");
-    } else {
-      // Удаляем одну строку
-      if (typeof itemToDelete === 'number' && itemToDelete > 1000000) {
-        await api.delete(`/api/defect/items/${itemToDelete}`);
+      // Обновляем данные с сервера
+      if (sheetId) {
+        loadSheetData(sheetId);
       }
       
-      setItems((prevItems) =>
-        prevItems.filter((item) => item.id !== itemToDelete),
-      );
-      setSelectedItems((prev) => prev.filter((id) => id !== itemToDelete));
-      showNotification("Строка удалена", "success");
+    } catch (error) {
+      console.error("❌ Error deleting item:", error);
+      showNotification(`Ошибка при удалении: ${error.message}`, "error");
+    } finally {
+      setProcessing(false);
+      setDeleteDialogOpen(false);
+      setItemToDelete(null);
     }
-    
-    // Обновляем данные с сервера
-    if (sheetId) {
-      loadSheetData(sheetId);
-    }
-    
-  } catch (error) {
-    console.error("❌ Error deleting item:", error);
-    showNotification(`Ошибка при удалении: ${error.message}`, "error");
-  } finally {
-    setProcessing(false);
-    setDeleteDialogOpen(false);
-    setItemToDelete(null);
-  }
-};
+  };
 
   const handleSave = async () => {
     try {
       console.log("💾 Saving sheet:", sheetId);
-      await api.post("/api/defect/save", { sheet_id: sheetId });
+      await api.saveDefectSheet(sheetId);
       showNotification("Ведомость сохранена", "success");
       loadSheetData(sheetId);
     } catch (error) {
@@ -497,14 +490,7 @@ const confirmDelete = async () => {
   const handleExport = async () => {
     try {
       console.log("📥 Exporting sheet:", sheetId);
-      const response = await api.post(
-        "/api/defect/export",
-        {
-          sheet_id: sheetId,
-          format: "excel",
-        },
-        { responseType: "blob" },
-      );
+      const response = await api.exportDefectSheet(sheetId, "excel");
 
       const url = window.URL.createObjectURL(new Blob([response.data]));
       const link = document.createElement("a");
@@ -521,85 +507,52 @@ const confirmDelete = async () => {
   };
 
   // ========== ЭКСПОРТ В ФОРМАТИРОВАННЫЙ EXCEL ==========
-  // ========== ЭКСПОРТ В ФОРМАТИРОВАННЫЙ EXCEL ==========
-// ========== ЭКСПОРТ В ФОРМАТИРОВАННЫЙ EXCEL (СУПЕР-ПРОСТАЯ ВЕРСИЯ) ==========
-// ========== ЭКСПОРТ В ФОРМАТИРОВАННЫЙ EXCEL (СУПЕР-ПРОСТАЯ ВЕРСИЯ) ==========
-const handleExportFormattedExcel = async () => {
-  console.log("🚀 ===== START EXPORT =====");
-  console.log("📊 Items count:", items.length);
-  console.log("🆔 Sheet ID:", sheetId);
-  console.log("🆔 Batch ID:", batchId);
-  
-  if (!items.length) {
-    console.log("⚠️ No items, aborting");
-    alert("Нет данных для экспорта");
-    return;
-  }
-
-  try {
-    setProcessing(true);
-    console.log("⏳ Processing set to true");
-
-    // Используем нативный fetch как в рабочем тесте
-    const url = 'http://localhost:8000/api/defect/export-excel';
-    console.log("📤 Fetching:", url);
-    console.log("📤 Body:", { sheet_id: sheetId });
-
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ sheet_id: sheetId })
-    });
-
-    console.log("📥 Response status:", response.status);
-    console.log("📥 Response ok:", response.ok);
-    console.log("📥 Response headers:", [...response.headers.entries()]);
-
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
+  const handleExportFormattedExcel = async () => {
+    console.log("🚀 ===== START EXPORT =====");
+    console.log("📊 Items count:", items.length);
+    console.log("🆔 Sheet ID:", sheetId);
+    console.log("🆔 Batch ID:", batchId);
+    
+    if (!items.length) {
+      console.log("⚠️ No items, aborting");
+      alert("Нет данных для экспорта");
+      return;
     }
 
-    const blob = await response.blob();
-    console.log("📥 Blob size:", blob.size);
-    console.log("📥 Blob type:", blob.type);
+    try {
+      setProcessing(true);
+      console.log("⏳ Processing set to true");
 
-    if (blob.size === 0) {
-      throw new Error("Blob is empty");
+      const response = await api.exportDefectSheetFormatted(sheetId);
+
+      const blob = await response.blob();
+      console.log("📥 Blob size:", blob.size);
+
+      if (blob.size === 0) {
+        throw new Error("Blob is empty");
+      }
+
+      const downloadUrl = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = downloadUrl;
+      link.download = `defect_sheet_${batchId || sheetId || "export"}.xlsx`;
+      document.body.appendChild(link);
+      link.click();
+
+      setTimeout(() => {
+        document.body.removeChild(link);
+        window.URL.revokeObjectURL(downloadUrl);
+      }, 100);
+
+      showNotification("Файл успешно экспортирован!", "success");
+
+    } catch (error) {
+      console.error("❌ ERROR:", error);
+      showNotification(`Ошибка: ${error.message}`, "error");
+    } finally {
+      setProcessing(false);
     }
-
-    // Скачивание
-    const downloadUrl = window.URL.createObjectURL(blob);
-    console.log("✅ Blob URL created:", downloadUrl);
-
-    const link = document.createElement('a');
-    link.href = downloadUrl;
-    link.download = `defect_sheet_${batchId || sheetId || "export"}.xlsx`;
-    console.log("📥 Download filename:", link.download);
-
-    document.body.appendChild(link);
-    console.log("✅ Link appended to body");
-
-    link.click();
-    console.log("✅ Clicked");
-
-    setTimeout(() => {
-      document.body.removeChild(link);
-      window.URL.revokeObjectURL(downloadUrl);
-      console.log("✅ Cleanup completed");
-    }, 100);
-
-    alert("Файл успешно экспортирован!");
-
-  } catch (error) {
-    console.error("❌ ERROR:", error);
-    alert(`Ошибка: ${error.message}`);
-  } finally {
-    setProcessing(false);
-    console.log("🏁 ===== EXPORT FINISHED =====");
-  }
-};
+  };
 
   const handleRefresh = () => {
     console.log("🔄 Manual refresh");
@@ -616,30 +569,23 @@ const handleExportFormattedExcel = async () => {
     setSelectedItems(numericSelection);
   };
 
-  // ========== РЕДАКТИРОВАНИЕ ЯЧЕЕК ==========
-  const handleCellEditStart = (id, field, value) => {
-    setEditCell({ id, field, value });
-  };
-
-  const handleCellEditCancel = () => {
-    setEditCell(null);
-  };
-
-  const handleCellEditSave = (id, field, newValue) => {
-    setItems((prevItems) =>
-      prevItems.map((item) =>
-        item.id === id ? { ...item, [field]: newValue } : item,
-      ),
-    );
-    setEditCell(null);
-    showNotification(`Ячейка обновлена`, "info");
-  };
-
-  const handleCellEditKeyDown = (e, id, field) => {
-    if (e.key === "Enter") {
-      handleCellEditSave(id, field, e.target.value);
-    } else if (e.key === "Escape") {
-      handleCellEditCancel();
+  // ========== ОБРАБОТЧИК РЕДАКТИРОВАНИЯ ИЗ МОДАЛЬНОГО ОКНА ==========
+  const handleEditModalSave = async (id, field, newValue) => {
+    try {
+      // Обновляем локальное состояние
+      setItems((prevItems) =>
+        prevItems.map((item) =>
+          item.id === id ? { ...item, [field]: newValue } : item,
+        ),
+      );
+      
+      // Сохраняем в БД
+      await api.updateDefectItemField(id, field, newValue);
+      
+      showNotification(`Поле "${field}" обновлено`, "success");
+    } catch (error) {
+      console.error("❌ Error updating field:", error);
+      showNotification(`Ошибка при обновлении: ${error.message}`, "error");
     }
   };
 
@@ -663,41 +609,9 @@ const handleExportFormattedExcel = async () => {
     setSelectedItems([]);
   };
 
-  // ========== РЕДАКТИРУЕМЫЕ КОЛОНКИ ==========
+  // ========== РЕДАКТИРУЕМЫЕ КОЛОНКИ С МОДАЛЬНЫМ ОКНОМ ==========
   const renderEditableCell = (params) => {
     const { id, field, value, row } = params;
-    const isEditing =
-      editCell && editCell.id === id && editCell.field === field;
-
-    if (isEditing) {
-      return (
-        <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
-          <TextField
-            size="small"
-            defaultValue={row[field]} // Используем исходное значение из row, а не отформатированное
-            autoFocus
-            onBlur={(e) => handleCellEditSave(id, field, e.target.value)}
-            onKeyDown={(e) => handleCellEditKeyDown(e, id, field)}
-            sx={{ width: "100%" }}
-          />
-          <IconButton
-            size="small"
-            onClick={() =>
-              handleCellEditSave(
-                id,
-                field,
-                document.getElementById(`edit-${id}-${field}`)?.value,
-              )
-            }
-          >
-            <CheckIcon fontSize="small" />
-          </IconButton>
-          <IconButton size="small" onClick={handleCellEditCancel}>
-            <CloseIcon fontSize="small" />
-          </IconButton>
-        </Box>
-      );
-    }
 
     // Для отображения используем форматированное значение
     let displayValue = value;
@@ -711,6 +625,17 @@ const handleExportFormattedExcel = async () => {
       displayValue = value || "-";
     }
 
+    // Функция открытия модального окна
+    const handleOpenEditModal = () => {
+      setEditCellData({
+        id: id,
+        field: field,
+        value: row[field] || '',
+        row: row
+      });
+      setEditModalOpen(true);
+    };
+
     return (
       <Box
         sx={{
@@ -718,6 +643,8 @@ const handleExportFormattedExcel = async () => {
           alignItems: "center",
           justifyContent: "space-between",
           width: "100%",
+          height: "100%",
+          pr: 0.5,
         }}
       >
         <Typography
@@ -726,330 +653,25 @@ const handleExportFormattedExcel = async () => {
             overflow: "hidden",
             textOverflow: "ellipsis",
             whiteSpace: "nowrap",
+            flex: 1,
           }}
         >
           {displayValue}
         </Typography>
         <IconButton
           size="small"
-          onClick={() => handleCellEditStart(id, field, row[field])} // Передаем исходное значение
-          sx={{ opacity: 0.5, "&:hover": { opacity: 1 } }}
+          onClick={handleOpenEditModal}
+          sx={{ 
+            opacity: 0.5, 
+            "&:hover": { opacity: 1 },
+            ml: 0.5,
+          }}
         >
           <EditIcon fontSize="small" />
         </IconButton>
       </Box>
     );
   };
-
-  // ========== ЭКСПОРТ В ФОРМАТЕ ДЕФЕКТНОЙ ВЕДОМОСТИ ==========
-  const handleExportToDefectFormat = () => {
-    if (!items.length) {
-      showNotification("Нет данных для экспорта", "warning");
-      return;
-    }
-
-    try {
-      // Группируем строки по требованиям (по дате или другому признаку)
-      const groupedByRequirement = items.reduce((acc, item) => {
-        const requirementKey =
-          item.requirement_date || item.requirement_number || "Без даты";
-        if (!acc[requirementKey]) {
-          acc[requirementKey] = [];
-        }
-        acc[requirementKey].push(item);
-        return acc;
-      }, {});
-
-      // Заголовки для формата как в документе
-      const headers = [
-        "№ п/п",
-        "Дата требования",
-        "Марка/Адрес",
-        "Наименование работ",
-        "Наименование материалов",
-      ];
-
-      // Создаем структуру данных для экспорта
-      const exportData = [];
-
-      // Добавляем заголовок документа
-      exportData.push(["Дефектная ведомость"]);
-      exportData.push([`За период: ${new Date().toLocaleDateString("ru-RU")}`]);
-      exportData.push([]);
-
-      // Добавляем основные заголовки
-      exportData.push(headers);
-
-      let position = 1;
-
-      // Обрабатываем каждое требование
-      Object.entries(groupedByRequirement).forEach(
-        ([requirementDate, requirementItems]) => {
-          // Добавляем строку с номером требования
-          exportData.push([`Требование: ${requirementDate}`, "", "", "", ""]);
-
-          // Добавляем пустую строку после номера требования
-          exportData.push(["", "", "", "", ""]);
-
-          // Добавляем элементы требования
-          requirementItems.forEach((item, index) => {
-            exportData.push([
-              index === 0 ? position.toString() : "",
-              item.requirement_date || "",
-              item.address || "",
-              item.address || "", // В колонку "Наименование работ" дублируем адрес
-              item.material_name || "",
-            ]);
-          });
-
-          // Добавляем пустые строки после требования
-          exportData.push(["", "", "", "", ""]);
-          exportData.push(["", "", "", "", ""]);
-
-          position++;
-        },
-      );
-
-      // Создаем XLS файл
-      const xlsContent = exportData
-        .map((row) =>
-          row
-            .map((cell) => `"${String(cell || "").replace(/"/g, '""')}"`)
-            .join("\t"),
-        )
-        .join("\n");
-
-      const blob = new Blob(["\uFEFF" + xlsContent], {
-        type: "application/vnd.ms-excel;charset=utf-8",
-      });
-
-      const fileName = `defect_sheet_${batchId ? batchId.slice(0, 8) : "temp"}_${new Date().toISOString().slice(0, 10)}.xls`;
-
-      const link = document.createElement("a");
-      const url = URL.createObjectURL(blob);
-
-      link.href = url;
-      link.download = fileName;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(url);
-
-      showNotification(`Экспортировано ${items.length} строк`, "success");
-    } catch (error) {
-      console.error("Ошибка при экспорте:", error);
-      showNotification(`Ошибка при экспорте: ${error.message}`, "error");
-    }
-  };
-
-  // ========== ЭКСПОРТ В ПРОСТОЙ XLS ==========
-  const handleExportToExcel = () => {
-    if (!items.length) {
-      showNotification("Нет данных для экспорта", "warning");
-      return;
-    }
-
-    try {
-      // Заголовки
-      const headers = [
-        "№ п/п",
-        "Марка (Адрес)",
-        "Наименование материала",
-        "Затреб (тонн)",
-        "Вес (тонн)",
-        "Тип профиля",
-        "Параметры",
-        "Пересчитано (метров)",
-        "Формула",
-        "Статус",
-      ];
-
-      // Данные
-      const dataRows = items.map((item) => {
-        const status = item.is_calculated ? "✓ Пересчитано" : "Ожидает";
-
-        return [
-          item.position || "",
-          item.address || "",
-          item.material_name || "",
-          item.requested_quantity
-            ? Number(item.requested_quantity).toFixed(3)
-            : "",
-          item.weight_tons ? Number(item.weight_tons).toFixed(3) : "",
-          item.profile_type || "",
-          item.profile_params ? JSON.stringify(item.profile_params) : "",
-          item.calculated_meters
-            ? Number(item.calculated_meters).toFixed(2)
-            : "",
-          item.formula_used || "",
-          status,
-        ];
-      });
-
-      // Заголовок с информацией
-      const title = [
-        ["Дефектная ведомость"],
-        [`Экспортировано: ${new Date().toLocaleString("ru-RU")}`],
-        [`Всего строк: ${items.length}`],
-        [`Batch ID: ${batchId || "не указан"}`],
-        [`Sheet ID: ${sheetId || "не указан"}`],
-        [],
-      ];
-
-      // Собираем весь контент
-      const fullContent = [...title, headers, ...dataRows];
-
-      // Создаем XLS файл (фактически TSV - табулированный текст)
-      const xlsContent = fullContent
-        .map((row) =>
-          row
-            .map((cell) => `"${String(cell || "").replace(/"/g, '""')}"`)
-            .join("\t"),
-        )
-        .join("\n");
-
-      // Создаем blob с BOM для правильной кодировки
-      const blob = new Blob(["\uFEFF" + xlsContent], {
-        type: "application/vnd.ms-excel;charset=utf-8",
-      });
-
-      // Генерируем имя файла
-      const fileName = `defect_sheet_simple_${batchId ? batchId.slice(0, 8) : "temp"}_${new Date().toISOString().slice(0, 10)}.xls`;
-
-      // Скачиваем файл
-      const link = document.createElement("a");
-      const url = URL.createObjectURL(blob);
-
-      link.href = url;
-      link.download = fileName;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(url);
-
-      showNotification(`Экспортировано ${items.length} строк в XLS`, "success");
-    } catch (error) {
-      console.error("Ошибка при экспорте в XLS:", error);
-      showNotification(`Ошибка при экспорте: ${error.message}`, "error");
-    }
-  };
-
-  // ========== ЭКСПОРТ В CSV ==========
-  const handleExportToCSV = () => {
-    if (!items.length) {
-      showNotification("Нет данных для экспорта", "warning");
-      return;
-    }
-
-    try {
-      // Заголовки
-      const headers = [
-        "№ п/п",
-        "Марка (Адрес)",
-        "Наименование материала",
-        "Затреб (тонн)",
-        "Вес (тонн)",
-        "Тип профиля",
-        "Параметры",
-        "Пересчитано (метров)",
-        "Формула",
-        "Статус",
-      ].join(";");
-
-      // Данные
-      const dataRows = items.map((item) => {
-        const status = item.is_calculated ? "✓ Пересчитано" : "Ожидает";
-
-        return [
-          `"${(item.position || "").replace(/"/g, '""')}"`,
-          `"${(item.address || "").replace(/"/g, '""')}"`,
-          `"${(item.material_name || "").replace(/"/g, '""')}"`,
-          item.requested_quantity
-            ? Number(item.requested_quantity).toFixed(3)
-            : "",
-          item.weight_tons ? Number(item.weight_tons).toFixed(3) : "",
-          `"${(item.profile_type || "").replace(/"/g, '""')}"`,
-          `"${(item.profile_params ? JSON.stringify(item.profile_params) : "").replace(/"/g, '""')}"`,
-          item.calculated_meters
-            ? Number(item.calculated_meters).toFixed(2)
-            : "",
-          `"${(item.formula_used || "").replace(/"/g, '""')}"`,
-          `"${status.replace(/"/g, '""')}"`,
-        ].join(";");
-      });
-
-      // Собираем CSV
-      const csvContent = [headers, ...dataRows].join("\n");
-
-      // Создаем blob
-      const blob = new Blob(["\uFEFF" + csvContent], {
-        type: "text/csv;charset=utf-8;",
-      });
-
-      // Генерируем имя файла
-      const fileName = `defect_sheet_${batchId ? batchId.slice(0, 8) : "temp"}_${new Date().toISOString().slice(0, 10)}.csv`;
-
-      // Скачиваем файл
-      const link = document.createElement("a");
-      const url = URL.createObjectURL(blob);
-
-      link.href = url;
-      link.download = fileName;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(url);
-
-      showNotification(`Экспортировано ${items.length} строк в CSV`, "success");
-    } catch (error) {
-      console.error("Ошибка при экспорте в CSV:", error);
-      showNotification(`Ошибка при экспорте: ${error.message}`, "error");
-    }
-  };
-
-
-
-  // // ========== РЕДАКТИРУЕМЫЕ КОЛОНКИ ==========
-  // const renderEditableCell = (params) => {
-  //   const { id, field, value } = params;
-  //   const isEditing = editCell && editCell.id === id && editCell.field === field;
-
-  //   if (isEditing) {
-  //     return (
-  //       <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-  //         <TextField
-  //           size="small"
-  //           defaultValue={value}
-  //           autoFocus
-  //           onBlur={(e) => handleCellEditSave(id, field, e.target.value)}
-  //           onKeyDown={(e) => handleCellEditKeyDown(e, id, field)}
-  //           sx={{ width: '100%' }}
-  //         />
-  //         <IconButton size="small" onClick={() => handleCellEditSave(id, field, document.getElementById(`edit-${id}-${field}`)?.value)}>
-  //           <CheckIcon fontSize="small" />
-  //         </IconButton>
-  //         <IconButton size="small" onClick={handleCellEditCancel}>
-  //           <CloseIcon fontSize="small" />
-  //         </IconButton>
-  //       </Box>
-  //     );
-  //   }
-
-  //   return (
-  //     <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-  //       <Typography variant="body2">
-  //         {value || '-'}
-  //       </Typography>
-  //       <IconButton
-  //         size="small"
-  //         onClick={() => handleCellEditStart(id, field, value)}
-  //         sx={{ opacity: 0.5, '&:hover': { opacity: 1 } }}
-  //       >
-  //         <EditIcon fontSize="small" />
-  //       </IconButton>
-  //     </Box>
-  //   );
-  // };
 
   // ========== КОЛОНКИ С РЕДАКТИРОВАНИЕМ И УДАЛЕНИЕМ ==========
   const columns = [
@@ -1082,14 +704,14 @@ const handleExportFormattedExcel = async () => {
       headerName: "Затреб (тонн)",
       width: 120,
       type: "number",
-      renderCell: (params) => renderEditableCell(params), // Убрали форматирование здесь, оно будет в renderEditableCell
+      renderCell: (params) => renderEditableCell(params),
     },
     {
       field: "weight_tons",
       headerName: "Вес (тонн)",
       width: 120,
       type: "number",
-      renderCell: (params) => renderEditableCell(params), // Убрали форматирование здесь
+      renderCell: (params) => renderEditableCell(params),
     },
     {
       field: "calculated_meters",
@@ -1179,6 +801,157 @@ const handleExportFormattedExcel = async () => {
     },
   ];
 
+  // ========== ЭКСПОРТ В ПРОСТОЙ XLS ==========
+  const handleExportToExcel = () => {
+    if (!items.length) {
+      showNotification("Нет данных для экспорта", "warning");
+      return;
+    }
+
+    try {
+      const headers = [
+        "№ п/п",
+        "Марка (Адрес)",
+        "Наименование материала",
+        "Затреб (тонн)",
+        "Вес (тонн)",
+        "Тип профиля",
+        "Параметры",
+        "Пересчитано (метров)",
+        "Формула",
+        "Статус",
+      ];
+
+      const dataRows = items.map((item) => {
+        const status = item.is_calculated ? "✓ Пересчитано" : "Ожидает";
+
+        return [
+          item.position || "",
+          item.address || "",
+          item.material_name || "",
+          item.requested_quantity
+            ? Number(item.requested_quantity).toFixed(3)
+            : "",
+          item.weight_tons ? Number(item.weight_tons).toFixed(3) : "",
+          item.profile_type || "",
+          item.profile_params ? JSON.stringify(item.profile_params) : "",
+          item.calculated_meters
+            ? Number(item.calculated_meters).toFixed(2)
+            : "",
+          item.formula_used || "",
+          status,
+        ];
+      });
+
+      const title = [
+        ["Дефектная ведомость"],
+        [`Экспортировано: ${new Date().toLocaleString("ru-RU")}`],
+        [`Всего строк: ${items.length}`],
+        [`Batch ID: ${batchId || "не указан"}`],
+        [`Sheet ID: ${sheetId || "не указан"}`],
+        [],
+      ];
+
+      const fullContent = [...title, headers, ...dataRows];
+
+      const xlsContent = fullContent
+        .map((row) =>
+          row
+            .map((cell) => `"${String(cell || "").replace(/"/g, '""')}"`)
+            .join("\t"),
+        )
+        .join("\n");
+
+      const blob = new Blob(["\uFEFF" + xlsContent], {
+        type: "application/vnd.ms-excel;charset=utf-8",
+      });
+
+      const fileName = `defect_sheet_simple_${batchId ? batchId.slice(0, 8) : "temp"}_${new Date().toISOString().slice(0, 10)}.xls`;
+
+      const link = document.createElement("a");
+      const url = URL.createObjectURL(blob);
+
+      link.href = url;
+      link.download = fileName;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+
+      showNotification(`Экспортировано ${items.length} строк в XLS`, "success");
+    } catch (error) {
+      console.error("Ошибка при экспорте в XLS:", error);
+      showNotification(`Ошибка при экспорте: ${error.message}`, "error");
+    }
+  };
+
+  // ========== ЭКСПОРТ В CSV ==========
+  const handleExportToCSV = () => {
+    if (!items.length) {
+      showNotification("Нет данных для экспорта", "warning");
+      return;
+    }
+
+    try {
+      const headers = [
+        "№ п/п",
+        "Марка (Адрес)",
+        "Наименование материала",
+        "Затреб (тонн)",
+        "Вес (тонн)",
+        "Тип профиля",
+        "Параметры",
+        "Пересчитано (метров)",
+        "Формула",
+        "Статус",
+      ].join(";");
+
+      const dataRows = items.map((item) => {
+        const status = item.is_calculated ? "✓ Пересчитано" : "Ожидает";
+
+        return [
+          `"${(item.position || "").replace(/"/g, '""')}"`,
+          `"${(item.address || "").replace(/"/g, '""')}"`,
+          `"${(item.material_name || "").replace(/"/g, '""')}"`,
+          item.requested_quantity
+            ? Number(item.requested_quantity).toFixed(3)
+            : "",
+          item.weight_tons ? Number(item.weight_tons).toFixed(3) : "",
+          `"${(item.profile_type || "").replace(/"/g, '""')}"`,
+          `"${(item.profile_params ? JSON.stringify(item.profile_params) : "").replace(/"/g, '""')}"`,
+          item.calculated_meters
+            ? Number(item.calculated_meters).toFixed(2)
+            : "",
+          `"${(item.formula_used || "").replace(/"/g, '""')}"`,
+          `"${status.replace(/"/g, '""')}"`,
+        ].join(";");
+      });
+
+      const csvContent = [headers, ...dataRows].join("\n");
+
+      const blob = new Blob(["\uFEFF" + csvContent], {
+        type: "text/csv;charset=utf-8;",
+      });
+
+      const fileName = `defect_sheet_${batchId ? batchId.slice(0, 8) : "temp"}_${new Date().toISOString().slice(0, 10)}.csv`;
+
+      const link = document.createElement("a");
+      const url = URL.createObjectURL(blob);
+
+      link.href = url;
+      link.download = fileName;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+
+      showNotification(`Экспортировано ${items.length} строк в CSV`, "success");
+    } catch (error) {
+      console.error("Ошибка при экспорте в CSV:", error);
+      showNotification(`Ошибка при экспорте: ${error.message}`, "error");
+    }
+  };
+
   // ========== ОТЛАДКА ==========
   useEffect(() => {
     console.log("🔥 State:", {
@@ -1244,7 +1017,6 @@ const handleExportFormattedExcel = async () => {
                 </IconButton>
               </Tooltip>
 
-              {/* Вспомогательные кнопки */}
               <Button
                 variant="outlined"
                 color="warning"
@@ -1275,7 +1047,6 @@ const handleExportFormattedExcel = async () => {
                 Очистить
               </Button>
 
-              {/* Кнопка удаления выбранных */}
               <Button
                 variant="outlined"
                 color="error"
@@ -1287,7 +1058,6 @@ const handleExportFormattedExcel = async () => {
                 Удалить выбранные ({selectedItems.length})
               </Button>
 
-              {/* Кнопка калькулятора (всегда активна) */}
               <Button
                 variant="contained"
                 color="secondary"
@@ -1299,7 +1069,6 @@ const handleExportFormattedExcel = async () => {
                 Калькулятор
               </Button>
 
-              {/* Основная кнопка пересчета */}
               <Button
                 id="calculate-button"
                 variant="contained"
@@ -1341,7 +1110,6 @@ const handleExportFormattedExcel = async () => {
                   if (useFormatted) {
                     handleExportFormattedExcel();
                   } else {
-                    // Старый простой экспорт
                     const useOldFormat = window.confirm(
                       "OK - XLS (старый Excel 97-2003)\n" + "Отмена - CSV",
                     );
@@ -1387,7 +1155,6 @@ const handleExportFormattedExcel = async () => {
         </Box>
       )}
 
-      {/* Диалог подтверждения удаления */}
       <Dialog
         open={deleteDialogOpen}
         onClose={() => setDeleteDialogOpen(false)}
@@ -1408,7 +1175,6 @@ const handleExportFormattedExcel = async () => {
         </DialogActions>
       </Dialog>
 
-      {/* Модальное окно для пакетного пересчета */}
       <MetalCalculatorModal
         open={calculatorOpen}
         onClose={() => setCalculatorOpen(false)}
@@ -1418,7 +1184,6 @@ const handleExportFormattedExcel = async () => {
         formulas={PROFILE_TYPES}
       />
 
-      {/* Модальное окно для простого калькулятора */}
       <SimpleCalculatorModal
         open={simpleCalculatorOpen?.open || false}
         onClose={() => setSimpleCalculatorOpen({ open: false, item: null })}
@@ -1426,6 +1191,16 @@ const handleExportFormattedExcel = async () => {
         item={simpleCalculatorOpen?.item}
         itemsData={items}
         formulas={PROFILE_TYPES}
+      />
+
+      <EditCellModal
+        open={editModalOpen}
+        onClose={() => {
+          setEditModalOpen(false);
+          setEditCellData(null);
+        }}
+        onSave={handleEditModalSave}
+        cellData={editCellData}
       />
 
       <Snackbar

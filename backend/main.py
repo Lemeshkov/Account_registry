@@ -2167,6 +2167,60 @@ async def batch_delete_defect_items(
         "item_ids": request.item_ids
     }
 
+
+#  эндпоинт для сохранения отредактированных полей
+
+class UpdateDefectItemFieldRequest(BaseModel):
+    field: str
+    value: Any
+
+@app.patch("/api/defect/items/{item_id}")
+async def update_defect_item_field(
+    item_id: int,
+    request: UpdateDefectItemFieldRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    Обновить отдельное поле строки дефектной ведомости
+    """
+    item = db.query(DefectSheetItem).filter(
+        DefectSheetItem.id == item_id
+    ).first()
+    
+    if not item:
+        raise HTTPException(404, "Строка не найдена")
+    
+    # Проверяем, что поле существует в модели
+    if not hasattr(item, request.field):
+        raise HTTPException(400, f"Поле {request.field} не существует")
+    
+    # Обновляем поле
+    setattr(item, request.field, request.value)
+    
+    # Если обновляем calculated_meters, меняем статус
+    if request.field == "calculated_meters":
+        item.is_calculated = True
+        item.calculated_at = datetime.now()
+    
+    db.commit()
+    
+    # Отправляем WebSocket уведомление
+    asyncio.create_task(websocket_manager.broadcast_to_batch(item.sheet.batch_id, {
+        "type": "defect_item_updated",
+        "sheet_id": item.sheet_id,
+        "batch_id": item.sheet.batch_id,
+        "item_id": item.id,
+        "field": request.field,
+        "value": request.value
+    }))
+    
+    return {
+        "status": "updated",
+        "item_id": item.id,
+        "field": request.field,
+        "value": request.value
+    }    
+
 # -------------------------------------------------------------------
 # WEB SOCKET SUPPORT
 # -------------------------------------------------------------------
