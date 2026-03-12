@@ -67,6 +67,10 @@ from typing import List, Optional
 import uuid
 from pathlib import Path
 import shutil
+from sqlalchemy import func  
+from sqlalchemy.orm import Session
+import asyncio
+from models import DefectSheet, DefectSheetItem  
 
 log = logging.getLogger(__name__)
 # WebSocket Manager импорт
@@ -1882,69 +1886,72 @@ async def export_defect_sheet_excel(
         cell.border = thin_border
         cell.alignment = center_alignment
     
-    # Группируем по датам требований
-    grouped_items = {}
-    for item in items:
-        date_key = item.requirement_date or datetime.now().date()
-        if date_key not in grouped_items:
-            grouped_items[date_key] = []
-        grouped_items[date_key].append(item)
+    # Сортируем все items по позиции для сохранения порядка
+    sorted_items = sorted(items, key=lambda x: x.position if x.position else 0)
     
     current_row = 5
-    position = 1
+    position_counter = 1
     
-    for date_key, requirement_items in grouped_items.items():
-        # Строка с номером требования
-        cell = ws.cell(row=current_row, column=1, value=f"Требование: {date_key}")
-        cell.font = Font(bold=True)
-        ws.merge_cells(f'A{current_row}:E{current_row}')
-        current_row += 1
+    # Записываем все строки подряд, без группировки по требованиям
+    for idx, item in enumerate(sorted_items):
+        # № п/п - сквозная нумерация
+        cell = ws.cell(row=current_row, column=1, value=position_counter)
+        cell.border = thin_border
+        cell.alignment = center_alignment
         
-        # Пустая строка
-        current_row += 1
-        
-        # Строки требования
-        for idx, item in enumerate(requirement_items):
-            # № п/п (только для первой строки требования)
-            if idx == 0:
-                cell = ws.cell(row=current_row, column=1, value=position)
-                cell.border = thin_border
+        # Дата требования
+        date_value = ""
+        if item.requirement_date:
+            if isinstance(item.requirement_date, datetime):
+                date_value = item.requirement_date.strftime('%d.%m.%Y')
             else:
-                cell = ws.cell(row=current_row, column=1, value="")
-                cell.border = thin_border
-            
-            # Дата требования
-            cell = ws.cell(row=current_row, column=2, value=item.requirement_date or "")
-            cell.border = thin_border
-            cell.alignment = center_alignment
-            
-            # Марка/Адрес
-            cell = ws.cell(row=current_row, column=3, value=item.address or "")
-            cell.border = thin_border
-            cell.alignment = left_alignment
-            
-            # Наименование работ (копируем адрес как в примере)
-            cell = ws.cell(row=current_row, column=4, value=item.address or "")
-            cell.border = thin_border
-            cell.alignment = left_alignment
-            
-            # Наименование материалов
-            cell = ws.cell(row=current_row, column=5, value=item.material_name or "")
-            cell.border = thin_border
-            cell.alignment = left_alignment
-            
-            current_row += 1
+                date_value = str(item.requirement_date)
         
-        # Две пустые строки после требования
-        current_row += 2
-        position += 1
+        cell = ws.cell(row=current_row, column=2, value=date_value)
+        cell.border = thin_border
+        cell.alignment = center_alignment
+        
+        # Марка/Адрес
+        cell = ws.cell(row=current_row, column=3, value=item.address or "")
+        cell.border = thin_border
+        cell.alignment = left_alignment
+        
+        # Наименование работ (копируем адрес как в примере)
+        cell = ws.cell(row=current_row, column=4, value=item.address or "")
+        cell.border = thin_border
+        cell.alignment = left_alignment
+        
+        #  ОБЪЕДИНЯЕМ ДАННЫЕ В КОЛОНКЕ НАИМЕНОВАНИЕ МАТЕРИАЛОВ 
+        material_parts = []
+        
+        # Добавляем наименование материала
+        if item.material_name:
+            material_parts.append(item.material_name)
+        
+        # Добавляем пересчитанные метры, если есть
+        if item.calculated_meters:
+            material_parts.append(f"пересчитано: {float(item.calculated_meters):.2f} м")
+        
+        # Добавляем вес в тоннах, если есть
+        if item.weight_tons:
+            material_parts.append(f"вес: {float(item.weight_tons):.3f} т")
+        
+        # Объединяем все части через перенос строки
+        combined_material = "\n".join(material_parts)
+        
+        cell = ws.cell(row=current_row, column=5, value=combined_material)
+        cell.border = thin_border
+        cell.alignment = left_alignment
+        
+        current_row += 1
+        position_counter += 1
     
     # Устанавливаем ширину колонок
-    ws.column_dimensions['A'].width = 10  # № п/п
-    ws.column_dimensions['B'].width = 15  # Дата требования
-    ws.column_dimensions['C'].width = 25  # Марка/Адрес
-    ws.column_dimensions['D'].width = 30  # Наименование работ
-    ws.column_dimensions['E'].width = 50  # Наименование материалов
+    ws.column_dimensions['A'].width = 10   # № п/п
+    ws.column_dimensions['B'].width = 15   # Дата требования
+    ws.column_dimensions['C'].width = 25   # Марка/Адрес
+    ws.column_dimensions['D'].width = 30   # Наименование работ
+    ws.column_dimensions['E'].width = 60   # Для объединенных данных
     
     # Добавляем границы для всей таблицы
     for row in ws.iter_rows(min_row=4, max_row=current_row-1, min_col=1, max_col=5):
@@ -1968,6 +1975,123 @@ async def export_defect_sheet_excel(
         }
     )
 
+
+
+# добавление созданных строк в базу
+class CreateDefectItemRequest(BaseModel):
+    sheet_id: int
+    position: Optional[int] = None
+    address: Optional[str] = None
+    material_name: Optional[str] = None
+    requested_quantity: Optional[float] = None
+    weight_tons: Optional[float] = None
+    profile_type: Optional[str] = None
+    profile_params: Optional[Dict[str, Any]] = None
+    calculated_meters: Optional[float] = None
+    formula_used: Optional[str] = None
+    is_calculated: bool = False
+
+@app.post("/api/defect/items", response_model=DefectSheetItemResponse)
+async def create_defect_item(
+    request: CreateDefectItemRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    Создать новую строку в дефектной ведомости
+    """
+    # Проверяем существование ведомости
+    sheet = db.query(DefectSheet).filter(DefectSheet.id == request.sheet_id).first()
+    if not sheet:
+        raise HTTPException(404, "Дефектная ведомость не найдена")
+    
+    # Определяем следующую позицию, если не указана
+    position = request.position
+    if position is None:
+        max_pos = db.query(func.max(DefectSheetItem.position)).filter(
+            DefectSheetItem.sheet_id == request.sheet_id
+        ).scalar() or 0
+        position = max_pos + 1
+    
+    # Создаем новую строку
+    new_item = DefectSheetItem(
+        sheet_id=request.sheet_id,
+        position=position,
+        address=request.address,
+        material_name=request.material_name,
+        requested_quantity=request.requested_quantity,
+        weight_tons=request.weight_tons,
+        profile_type=request.profile_type,
+        profile_params=request.profile_params,
+        calculated_meters=request.calculated_meters,
+        formula_used=request.formula_used,
+        is_calculated=request.is_calculated,
+        selected_for_calculation=False
+    )
+    
+    db.add(new_item)
+    db.commit()
+    db.refresh(new_item)
+    
+    # Обновляем общее количество в ведомости
+    total_items = db.query(func.count(DefectSheetItem.id)).filter(
+        DefectSheetItem.sheet_id == request.sheet_id
+    ).scalar()
+    sheet.total_items = total_items
+    db.commit()
+    
+    # Отправляем WebSocket уведомление
+    asyncio.create_task(websocket_manager.broadcast_to_batch(sheet.batch_id, {
+        "type": "defect_item_created",
+        "sheet_id": sheet.id,
+        "batch_id": sheet.batch_id,
+        "item_id": new_item.id,
+        "position": new_item.position
+    }))
+    
+    return new_item
+
+# эндпоинт для удаления строки
+@app.delete("/api/defect/items/{item_id}")
+async def delete_defect_item(
+    item_id: int,
+    db: Session = Depends(get_db)
+):
+    """
+    Удалить строку из дефектной ведомости
+    """
+    item = db.query(DefectSheetItem).filter(
+        DefectSheetItem.id == item_id
+    ).first()
+    
+    if not item:
+        raise HTTPException(404, "Строка не найдена")
+    
+    sheet_id = item.sheet_id
+    batch_id = item.sheet.batch_id
+    
+    db.delete(item)
+    db.commit()
+    
+    # Обновляем общее количество
+    total_items = db.query(func.count(DefectSheetItem.id)).filter(
+        DefectSheetItem.sheet_id == sheet_id
+    ).scalar()
+    sheet = db.query(DefectSheet).filter(DefectSheet.id == sheet_id).first()
+    if sheet:
+        sheet.total_items = total_items
+        db.commit()
+    
+    # Отправляем WebSocket уведомление
+    asyncio.create_task(websocket_manager.broadcast_to_batch(batch_id, {
+        "type": "defect_item_deleted",
+        "sheet_id": sheet_id,
+        "batch_id": batch_id,
+        "item_id": item_id
+    }))
+    
+    return {"status": "deleted", "item_id": item_id}
+
+
 @app.delete("/api/defect/{sheet_id}")
 def delete_defect_sheet_endpoint(
     sheet_id: int,
@@ -1984,6 +2108,64 @@ def delete_defect_sheet_endpoint(
     
     return {"status": "deleted", "batch_id": batch_id}
 
+
+# для более эффективного удаления строк batch delete
+
+class BatchDeleteRequest(BaseModel):
+    item_ids: List[int]
+
+@app.post("/api/defect/items/batch-delete")
+async def batch_delete_defect_items(
+    request: BatchDeleteRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    Удалить несколько строк из дефектной ведомости
+    """
+    if not request.item_ids:
+        raise HTTPException(400, "Список ID пуст")
+    
+    # Получаем первую строку для информации о sheet и batch
+    first_item = db.query(DefectSheetItem).filter(
+        DefectSheetItem.id == request.item_ids[0]
+    ).first()
+    
+    if not first_item:
+        raise HTTPException(404, "Строки не найдены")
+    
+    sheet_id = first_item.sheet_id
+    batch_id = first_item.sheet.batch_id
+    
+    # Удаляем все указанные строки
+    deleted = db.query(DefectSheetItem).filter(
+        DefectSheetItem.id.in_(request.item_ids)
+    ).delete(synchronize_session=False)
+    
+    db.commit()
+    
+    # Обновляем общее количество
+    total_items = db.query(func.count(DefectSheetItem.id)).filter(
+        DefectSheetItem.sheet_id == sheet_id
+    ).scalar()
+    
+    sheet = db.query(DefectSheet).filter(DefectSheet.id == sheet_id).first()
+    if sheet:
+        sheet.total_items = total_items
+        db.commit()
+    
+    # Отправляем WebSocket уведомление
+    asyncio.create_task(websocket_manager.broadcast_to_batch(batch_id, {
+        "type": "defect_items_deleted",
+        "sheet_id": sheet_id,
+        "batch_id": batch_id,
+        "deleted_count": deleted
+    }))
+    
+    return {
+        "status": "deleted",
+        "deleted_count": deleted,
+        "item_ids": request.item_ids
+    }
 
 # -------------------------------------------------------------------
 # WEB SOCKET SUPPORT

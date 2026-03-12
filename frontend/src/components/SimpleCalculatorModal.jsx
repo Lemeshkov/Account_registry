@@ -397,50 +397,53 @@ const SimpleCalculatorModal = ({ open, onClose, onCalculate, item, itemsData, fo
   };
 
   // Применить результат к строке
-  const handleApply = () => {
-    if (!result) return;
-    
-    if (createNewRow) {
-      // Создаем новую строку
-      if (!newRowData.material_name) {
-        alert('Введите наименование материала');
-        return;
-      }
-      
-      const newItem = {
-        id: Date.now(), // временный ID, при сохранении заменится на реальный
-        position: newRowData.position || '1',
-        address: newRowData.address || '',
-        material_name: newRowData.material_name,
-        requested_quantity: result.tons.toFixed(3),
-        weight_tons: result.tons.toFixed(3),
-        calculated_meters: result.meters.toFixed(2),
-        profile_type: selectedType,
-        profile_params: params,
-        is_calculated: true,
-        formula_used: result.formula,
-      };
-      
-      onCalculate({
-        ...result,
-        isNewRow: true,
-        newRowData: newItem
-      });
-    } else {
-      // Обновляем существующую строку
-      const resultData = {
-        id: item?.id || Date.now(),
-        meters: result.meters.toFixed(2),
-        weightTons: result.tons.toFixed(3),
-        profileType: selectedType,
-        formula: result.formula,
-      };
-      
-      onCalculate(resultData);
+ const handleApply = () => {
+  if (!result) return;
+  
+  if (createNewRow) {
+    // Создаем новую строку
+    if (!newRowData.material_name) {
+      alert('Введите наименование материала');
+      return;
     }
     
-    onClose();
-  };
+    const newItem = {
+      id: Date.now(), // временный ID, при сохранении заменится на реальный
+      position: newRowData.position || '1',
+      address: newRowData.address || '',
+      material_name: newRowData.material_name,
+      requested_quantity: result.tons,
+      weight_tons: result.tons,
+      calculated_meters: result.meters,
+      profile_type: selectedType,
+      profile_params: params, // <-- передаем параметры профиля
+      is_calculated: true,
+      formula_used: result.formula,
+    };
+    
+    onCalculate({
+      ...result,
+      isNewRow: true,
+      newRowData: newItem,
+      profile_params: params, // <-- добавляем в результат
+      type: selectedType
+    });
+  } else {
+    // Обновляем существующую строку
+    const resultData = {
+      id: item?.id || Date.now(),
+      meters: result.meters,
+      weightTons: result.tons,
+      profileType: selectedType,
+      profile_params: params, // <-- добавляем параметры
+      formula: result.formula,
+    };
+    
+    onCalculate(resultData);
+  }
+  
+  onClose();
+};
 
   // Описание формулы
   const getFormulaDescription = (type, params) => {

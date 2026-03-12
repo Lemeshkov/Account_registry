@@ -348,17 +348,52 @@ const DefectSheetPage = () => {
   };
 
   // ========== КАЛЬКУЛЯТОР ДЛЯ ОДНОЙ СТРОКИ ==========
-  const handleSimpleCalculate = (result) => {
+  const handleSimpleCalculate = async (result) => {
+  try {
     if (result.isNewRow) {
-      // Создаем новую строку
-      const newItem = {
-        ...result.newRowData,
-        id: Date.now(), // временный ID
+      // Сохраняем новую строку в БД
+      setProcessing(true);
+      
+      const newItemData = {
+        sheet_id: sheetId,
+        position: parseInt(result.newRowData.position) || null,
+        address: result.newRowData.address || '',
+        material_name: result.newRowData.material_name,
+        requested_quantity: result.tons,
+        weight_tons: result.tons,
+        calculated_meters: result.meters,
+        profile_type: result.type,
+        profile_params: result.profile_params || {},
+        formula_used: result.formula,
+        is_calculated: true
       };
-      setItems((prevItems) => [...prevItems, newItem]);
-      showNotification(`Новая строка создана: ${result.meters} м`, "success");
+      
+      console.log("📤 Saving new item to DB:", newItemData);
+      
+      // Отправляем на сервер
+      const savedItem = await api.createDefectItem(newItemData);
+      console.log("✅ Item saved to DB:", savedItem);
+      
+      // Добавляем в локальное состояние с реальным ID из БД
+      setItems((prevItems) => [
+        ...prevItems,
+        {
+          ...savedItem,
+          id: savedItem.id, // Используем реальный ID из БД
+          isEditing: false,
+        }
+      ]);
+      
+      showNotification(
+        `Новая строка создана и сохранена: ${result.meters.toFixed(2)} м`,
+        "success"
+      );
+      
+      // Обновляем данные с сервера для синхронизации
+      setTimeout(() => loadSheetData(sheetId), 500);
+      
     } else {
-      // Обновляем существующую строку
+      // Обновляем существующую строку (уже есть в БД)
       setItems((prevItems) =>
         prevItems.map((item) =>
           item.id === result.id
@@ -369,15 +404,20 @@ const DefectSheetPage = () => {
                 is_calculated: true,
                 formula_used: result.formula,
                 weight_tons: result.weightTons || item.weight_tons,
-                requested_quantity:
-                  result.weightTons || item.requested_quantity,
+                requested_quantity: result.weightTons || item.requested_quantity,
               }
             : item,
         ),
       );
-      showNotification(`Строка пересчитана: ${result.meters} м`, "success");
+      showNotification(`Строка пересчитана: ${result.meters.toFixed(2)} м`, "success");
     }
-  };
+  } catch (error) {
+    console.error("❌ Error saving item:", error);
+    showNotification(`Ошибка при сохранении: ${error.message}`, "error");
+  } finally {
+    setProcessing(false);
+  }
+};
 
   // ========== УДАЛЕНИЕ СТРОК ==========
   const handleDeleteClick = (id) => {
@@ -394,9 +434,21 @@ const DefectSheetPage = () => {
     setDeleteDialogOpen(true);
   };
 
-  const confirmDelete = () => {
+  // frontend/src/pages/DefectSheetPage.jsx - обновите confirmDelete
+
+const confirmDelete = async () => {
+  try {
+    setProcessing(true);
+    
     if (itemToDelete === "selected") {
-      // Удаляем выбранные строки
+      // Удаляем выбранные строки по одной (или можно сделать batch delete)
+      for (const id of selectedItems) {
+        // Проверяем, что это реальный ID из БД (число), а не временный
+        if (typeof id === 'number' && id > 1000000) { // примерный порог
+          await api.delete(`/api/defect/items/${id}`);
+        }
+      }
+      
       setItems((prevItems) =>
         prevItems.filter((item) => !selectedItems.includes(item.id)),
       );
@@ -404,15 +456,31 @@ const DefectSheetPage = () => {
       showNotification(`Удалено ${selectedItems.length} строк`, "success");
     } else {
       // Удаляем одну строку
+      if (typeof itemToDelete === 'number' && itemToDelete > 1000000) {
+        await api.delete(`/api/defect/items/${itemToDelete}`);
+      }
+      
       setItems((prevItems) =>
         prevItems.filter((item) => item.id !== itemToDelete),
       );
       setSelectedItems((prev) => prev.filter((id) => id !== itemToDelete));
       showNotification("Строка удалена", "success");
     }
+    
+    // Обновляем данные с сервера
+    if (sheetId) {
+      loadSheetData(sheetId);
+    }
+    
+  } catch (error) {
+    console.error("❌ Error deleting item:", error);
+    showNotification(`Ошибка при удалении: ${error.message}`, "error");
+  } finally {
+    setProcessing(false);
     setDeleteDialogOpen(false);
     setItemToDelete(null);
-  };
+  }
+};
 
   const handleSave = async () => {
     try {
