@@ -315,18 +315,34 @@ def reorder_registry_batch(db: Session, batch_id: str, order_mapping: Dict[int, 
 # CRUD для дефектных ведомостей
 # -------------------------------------------------------------------
 
-def create_defect_sheet(db: Session, file_name: str, batch_id: Optional[str] = None) -> models.DefectSheet:
-    """Создать запись о дефектной ведомости"""
+def create_defect_sheet(
+    db: Session, 
+    file_name: str, 
+    batch_id: Optional[str] = None, 
+    user_id: Optional[int] = None
+) -> models.DefectSheet:
+    """
+    Создать запись о дефектной ведомости
+    
+    Args:
+        db: сессия БД
+        file_name: имя файла
+        batch_id: ID батча (если None, генерируется новый)
+        user_id: ID пользователя, создавшего ведомость
+    """
     if not batch_id:
         batch_id = str(uuid.uuid4())
     
     sheet = models.DefectSheet(
         batch_id=batch_id,
         file_name=file_name,
-        status="pending"
+        status="pending",
+        created_by=user_id,  # Добавляем user_id
+        version=1
+        # upload_date и created_at заполнятся автоматически (DEFAULT CURRENT_TIMESTAMP)
     )
     db.add(sheet)
-    db.flush()  # Чтобы получить id
+    db.flush()
     return sheet
 
 def create_defect_sheet_items(db: Session, sheet_id: int, items_data: List[Dict]):
@@ -424,14 +440,14 @@ def delete_defect_sheet(db: Session, sheet_id: int):
     db.query(models.DefectSheet).filter(models.DefectSheet.id == sheet_id).delete()
     db.flush()
 
-def create_defect_sheet(db: Session, batch_id: str, file_name: str) -> models.DefectSheet:
-    """Создает запись о дефектной ведомости"""
-    sheet = models.DefectSheet(
-        batch_id=batch_id,
-        file_name=file_name,
-        status="pending",
-        # uploaded_at=datetime.now()
-    )
-    db.add(sheet)
-    db.flush()
-    return sheet    
+# def create_defect_sheet(db: Session, batch_id: str, file_name: str) -> models.DefectSheet:
+#     """Создает запись о дефектной ведомости"""
+#     sheet = models.DefectSheet(
+#         batch_id=batch_id,
+#         file_name=file_name,
+#         status="pending",
+#         # uploaded_at=datetime.now()
+#     )
+#     db.add(sheet)
+#     db.flush()
+#     return sheet    

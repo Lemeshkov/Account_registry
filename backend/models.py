@@ -167,6 +167,48 @@ class DefectSheet(Base):
     
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
+     #  поля для согласования
+    created_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    
+    status = Column(String, default="draft")  # "draft", "pending", "approved", "rejected"
+    
+    submitted_at = Column(DateTime(timezone=True), nullable=True)
+    submitted_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    
+    approved_at = Column(DateTime(timezone=True), nullable=True)
+    approved_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    approval_comment = Column(Text, nullable=True)
+    
+    rejected_at = Column(DateTime(timezone=True), nullable=True)
+    rejected_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    rejection_reason = Column(Text, nullable=True)
+    
+    # Для версионности
+    version = Column(Integer, default=1)
+    previous_version_id = Column(Integer, ForeignKey("defect_sheets.id"), nullable=True)
+
+
+class ApprovalNotification(Base):
+    __tablename__ = "approval_notifications"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    sheet_id = Column(Integer, ForeignKey("defect_sheets.id", ondelete="CASCADE"), nullable=False)
+    approver_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    created_by_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    
+    message = Column(String, nullable=False)
+    status = Column(String, default="unread")  # "unread", "read", "processed"
+    
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    read_at = Column(DateTime(timezone=True), nullable=True)
+    processed_at = Column(DateTime(timezone=True), nullable=True)
+    
+    # Связи
+    sheet = relationship("DefectSheet", backref="approval_notifications")
+    approver = relationship("User", foreign_keys=[approver_id])
+    created_by = relationship("User", foreign_keys=[created_by_id])   
+
 
 class DefectSheetItem(Base):
     __tablename__ = "defect_sheet_items"
@@ -211,3 +253,21 @@ class DefectSheetItem(Base):
     
     # Связи
     sheet = relationship("DefectSheet", backref="items")
+
+#  модели юзеров
+    
+class User(Base):
+    __tablename__ = "users"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    username = Column(String, unique=True, index=True, nullable=False)
+    email = Column(String, unique=True, index=True)
+    full_name = Column(String)
+    hashed_password = Column(String)
+    role = Column(String, default="user")  # "user", "approver", "admin"
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    
+    # Связи
+    created_sheets = relationship("DefectSheet", foreign_keys="DefectSheet.created_by", backref="creator")
+    approved_sheets = relationship("DefectSheet", foreign_keys="DefectSheet.approved_by", backref="approver")

@@ -31,6 +31,7 @@ import {
   Functions as CalculatorIcon,
   Delete as DeleteIcon,
   DeleteSweep as DeleteSweepIcon,
+  Send as SendIcon,
 } from "@mui/icons-material";
 import { DataGrid, GridToolbar } from "@mui/x-data-grid";
 import { useWebSocket } from "../hooks/useWebSocket";
@@ -195,8 +196,8 @@ const DefectSheetPage = () => {
   const [itemToDelete, setItemToDelete] = useState(null);
   const [editModalOpen, setEditModalOpen] = useState(false);
   const [editCellData, setEditCellData] = useState(null);
-
   const { lastMessage, connectionStatus } = useWebSocket(batchId);
+  const [sheetStatus, setSheetStatus] = useState('draft'); 
 
   // ========== ЗАГРУЗКА ДАННЫХ ==========
   const loadSheetData = async (id) => {
@@ -354,11 +355,11 @@ const DefectSheetPage = () => {
       if (result.isNewRow) {
         // Сохраняем новую строку в БД
         setProcessing(true);
-        
+
         const newItemData = {
           sheet_id: sheetId,
           position: parseInt(result.newRowData.position) || null,
-          address: result.newRowData.address || '',
+          address: result.newRowData.address || "",
           material_name: result.newRowData.material_name,
           requested_quantity: result.tons,
           weight_tons: result.tons,
@@ -366,32 +367,31 @@ const DefectSheetPage = () => {
           profile_type: result.type,
           profile_params: result.profile_params || {},
           formula_used: result.formula,
-          is_calculated: true
+          is_calculated: true,
         };
-        
+
         console.log("📤 Saving new item to DB:", newItemData);
-        
+
         // Отправляем на сервер
         const savedItem = await api.createDefectItem(newItemData);
         console.log("✅ Item saved to DB:", savedItem);
-        
+
         // Добавляем в локальное состояние с реальным ID из БД
         setItems((prevItems) => [
           ...prevItems,
           {
             ...savedItem,
             id: savedItem.id,
-          }
+          },
         ]);
-        
+
         showNotification(
           `Новая строка создана и сохранена: ${result.meters.toFixed(2)} м`,
-          "success"
+          "success",
         );
-        
+
         // Обновляем данные с сервера для синхронизации
         setTimeout(() => loadSheetData(sheetId), 500);
-        
       } else {
         // Обновляем существующую строку (уже есть в БД)
         setItems((prevItems) =>
@@ -404,12 +404,16 @@ const DefectSheetPage = () => {
                   is_calculated: true,
                   formula_used: result.formula,
                   weight_tons: result.weightTons || item.weight_tons,
-                  requested_quantity: result.weightTons || item.requested_quantity,
+                  requested_quantity:
+                    result.weightTons || item.requested_quantity,
                 }
               : item,
           ),
         );
-        showNotification(`Строка пересчитана: ${result.meters.toFixed(2)} м`, "success");
+        showNotification(
+          `Строка пересчитана: ${result.meters.toFixed(2)} м`,
+          "success",
+        );
       }
     } catch (error) {
       console.error("❌ Error saving item:", error);
@@ -437,13 +441,13 @@ const DefectSheetPage = () => {
   const confirmDelete = async () => {
     try {
       setProcessing(true);
-      
+
       if (itemToDelete === "selected") {
         // Массовое удаление выбранных строк
         if (selectedItems.length > 0) {
           await api.batchDeleteDefectItems(selectedItems);
         }
-        
+
         setItems((prevItems) =>
           prevItems.filter((item) => !selectedItems.includes(item.id)),
         );
@@ -452,19 +456,18 @@ const DefectSheetPage = () => {
       } else {
         // Удаляем одну строку
         await api.deleteDefectItem(itemToDelete);
-        
+
         setItems((prevItems) =>
           prevItems.filter((item) => item.id !== itemToDelete),
         );
         setSelectedItems((prev) => prev.filter((id) => id !== itemToDelete));
         showNotification("Строка удалена", "success");
       }
-      
+
       // Обновляем данные с сервера
       if (sheetId) {
         loadSheetData(sheetId);
       }
-      
     } catch (error) {
       console.error("❌ Error deleting item:", error);
       showNotification(`Ошибка при удалении: ${error.message}`, "error");
@@ -512,7 +515,7 @@ const DefectSheetPage = () => {
     console.log("📊 Items count:", items.length);
     console.log("🆔 Sheet ID:", sheetId);
     console.log("🆔 Batch ID:", batchId);
-    
+
     if (!items.length) {
       console.log("⚠️ No items, aborting");
       alert("Нет данных для экспорта");
@@ -533,7 +536,7 @@ const DefectSheetPage = () => {
       }
 
       const downloadUrl = window.URL.createObjectURL(blob);
-      const link = document.createElement('a');
+      const link = document.createElement("a");
       link.href = downloadUrl;
       link.download = `defect_sheet_${batchId || sheetId || "export"}.xlsx`;
       document.body.appendChild(link);
@@ -545,7 +548,6 @@ const DefectSheetPage = () => {
       }, 100);
 
       showNotification("Файл успешно экспортирован!", "success");
-
     } catch (error) {
       console.error("❌ ERROR:", error);
       showNotification(`Ошибка: ${error.message}`, "error");
@@ -560,6 +562,31 @@ const DefectSheetPage = () => {
       loadSheetData(sheetId);
     }
   };
+
+  // ========== ОТПРАВКА НА СОГЛАСОВАНИЕ ==========
+const handleSubmitForApproval = async () => {
+  try {
+    setProcessing(true);
+
+    const comment = window.prompt("Введите комментарий (необязательно):");
+
+    await api.post("/api/defect/submit-for-approval", {
+      sheet_id: sheetId,
+      comment: comment || undefined,
+    });
+
+    showNotification("Ведомость отправлена на согласование", "success");
+    
+    // Обновляем статус
+    setSheetStatus("pending");
+    loadSheetData(sheetId);
+  } catch (error) {
+    console.error("Error submitting for approval:", error);
+    showNotification(`Ошибка: ${error.message}`, "error");
+  } finally {
+    setProcessing(false);
+  }
+};
 
   // ========== ОБРАБОТЧИК ВЫДЕЛЕНИЯ ==========
   const handleRowSelectionChange = (newSelection) => {
@@ -578,10 +605,10 @@ const DefectSheetPage = () => {
           item.id === id ? { ...item, [field]: newValue } : item,
         ),
       );
-      
+
       // Сохраняем в БД
       await api.updateDefectItemField(id, field, newValue);
-      
+
       showNotification(`Поле "${field}" обновлено`, "success");
     } catch (error) {
       console.error("❌ Error updating field:", error);
@@ -630,10 +657,35 @@ const DefectSheetPage = () => {
       setEditCellData({
         id: id,
         field: field,
-        value: row[field] || '',
-        row: row
+        value: row[field] || "",
+        row: row,
       });
       setEditModalOpen(true);
+    };
+
+    // Согласование
+
+    const handleSubmitForApproval = async () => {
+      try {
+        setProcessing(true);
+
+        const comment = window.prompt("Введите комментарий (необязательно):");
+
+        await api.post("/api/defect/submit-for-approval", {
+          sheet_id: sheetId,
+          comment: comment || undefined,
+        });
+
+        showNotification("Ведомость отправлена на согласование", "success");
+
+        // Обновляем статус
+        loadSheetData(sheetId);
+      } catch (error) {
+        console.error("Error submitting for approval:", error);
+        showNotification(`Ошибка: ${error.message}`, "error");
+      } finally {
+        setProcessing(false);
+      }
     };
 
     return (
@@ -661,8 +713,8 @@ const DefectSheetPage = () => {
         <IconButton
           size="small"
           onClick={handleOpenEditModal}
-          sx={{ 
-            opacity: 0.5, 
+          sx={{
+            opacity: 0.5,
             "&:hover": { opacity: 1 },
             ml: 0.5,
           }}
@@ -966,252 +1018,571 @@ const DefectSheetPage = () => {
   }, [batchId, sheetId, items, loading, processing, selectedItems]);
 
   // ========== РЕНДЕР ==========
-  return (
-    <Box sx={{ p: 3 }}>
-      <Typography variant="h4" gutterBottom>
-        Дефектная ведомость
-        {connectionStatus === "connected" && (
-          <Chip
-            label="WebSocket подключен"
-            color="success"
-            size="small"
-            sx={{ ml: 2 }}
-          />
-        )}
-      </Typography>
+return (
+  <Box sx={{ p: 3 }}>
+    <Typography variant="h4" gutterBottom>
+      Дефектная ведомость
+      {connectionStatus === "connected" && (
+        <Chip
+          label="WebSocket подключен"
+          color="success"
+          size="small"
+          sx={{ ml: 2 }}
+        />
+      )}
+    </Typography>
 
-      {!batchId ? (
-        <DefectSheetUploader onUploadSuccess={handleUploadSuccess} />
-      ) : (
-        <Box>
-          <Paper sx={{ p: 2, mb: 2 }}>
-            <Box
-              sx={{
-                display: "flex",
-                gap: 2,
-                alignItems: "center",
-                flexWrap: "wrap",
-              }}
-            >
-              <Typography variant="subtitle1">Batch ID: {batchId}</Typography>
+    {!batchId ? (
+      <DefectSheetUploader onUploadSuccess={handleUploadSuccess} />
+    ) : (
+      <Box>
+        <Paper sx={{ p: 2, mb: 2 }}>
+          <Box
+            sx={{
+              display: "flex",
+              gap: 2,
+              alignItems: "center",
+              flexWrap: "wrap",
+            }}
+          >
+            <Typography variant="subtitle1">Batch ID: {batchId}</Typography>
+            <Chip
+              label={processing ? "Обработка..." : "Готово"}
+              color={processing ? "warning" : "success"}
+            />
+            <Chip
+              label={`Записей: ${items.length}`}
+              color="info"
+              variant="outlined"
+            />
+            <Chip
+              label={`Выбрано: ${selectedItems.length}`}
+              color={selectedItems.length > 0 ? "primary" : "default"}
+              variant="outlined"
+            />
+
+            {/* Индикатор статуса согласования */}
+            {sheetStatus && sheetStatus !== "draft" && (
               <Chip
-                label={processing ? "Обработка..." : "Готово"}
-                color={processing ? "warning" : "success"}
-              />
-              <Chip
-                label={`Записей: ${items.length}`}
-                color="info"
-                variant="outlined"
-              />
-              <Chip
-                label={`Выбрано: ${selectedItems.length}`}
-                color={selectedItems.length > 0 ? "primary" : "default"}
-                variant="outlined"
-              />
-
-              <Box sx={{ flexGrow: 1 }} />
-
-              <Tooltip title="Обновить">
-                <IconButton onClick={handleRefresh} disabled={loading}>
-                  <RefreshIcon />
-                </IconButton>
-              </Tooltip>
-
-              <Button
-                variant="outlined"
-                color="warning"
-                size="small"
-                onClick={handleTestSelect}
-                disabled={items.length === 0}
-              >
-                Выбрать первый
-              </Button>
-
-              <Button
-                variant="outlined"
-                color="warning"
-                size="small"
-                onClick={handleSelectAll}
-                disabled={items.length === 0}
-              >
-                Выбрать все
-              </Button>
-
-              <Button
-                variant="outlined"
-                color="warning"
-                size="small"
-                onClick={handleClearSelection}
-                disabled={selectedItems.length === 0}
-              >
-                Очистить
-              </Button>
-
-              <Button
-                variant="outlined"
-                color="error"
-                size="small"
-                startIcon={<DeleteSweepIcon />}
-                onClick={handleDeleteSelected}
-                disabled={selectedItems.length === 0}
-              >
-                Удалить выбранные ({selectedItems.length})
-              </Button>
-
-              <Button
-                variant="contained"
-                color="secondary"
-                startIcon={<CalculatorIcon />}
-                onClick={() =>
-                  setSimpleCalculatorOpen({ open: true, item: null })
+                label={
+                  sheetStatus === "pending"
+                    ? "⏳ Ожидает согласования"
+                    : sheetStatus === "approved"
+                      ? "✅ Согласовано"
+                      : sheetStatus === "rejected"
+                        ? "❌ Отклонено"
+                        : sheetStatus
                 }
-              >
-                Калькулятор
-              </Button>
+                color={
+                  sheetStatus === "pending"
+                    ? "warning"
+                    : sheetStatus === "approved"
+                      ? "success"
+                      : sheetStatus === "rejected"
+                        ? "error"
+                        : "default"
+                }
+                variant="filled"
+              />
+            )}
 
+            <Box sx={{ flexGrow: 1 }} />
+
+            <Tooltip title="Обновить">
+              <IconButton onClick={handleRefresh} disabled={loading}>
+                <RefreshIcon />
+              </IconButton>
+            </Tooltip>
+
+            <Button
+              variant="outlined"
+              color="warning"
+              size="small"
+              onClick={handleTestSelect}
+              disabled={items.length === 0}
+            >
+              Выбрать первый
+            </Button>
+
+            <Button
+              variant="outlined"
+              color="warning"
+              size="small"
+              onClick={handleSelectAll}
+              disabled={items.length === 0}
+            >
+              Выбрать все
+            </Button>
+
+            <Button
+              variant="outlined"
+              color="warning"
+              size="small"
+              onClick={handleClearSelection}
+              disabled={selectedItems.length === 0}
+            >
+              Очистить
+            </Button>
+
+            <Button
+              variant="outlined"
+              color="error"
+              size="small"
+              startIcon={<DeleteSweepIcon />}
+              onClick={handleDeleteSelected}
+              disabled={selectedItems.length === 0}
+            >
+              Удалить выбранные ({selectedItems.length})
+            </Button>
+
+            <Button
+              variant="contained"
+              color="secondary"
+              startIcon={<CalculatorIcon />}
+              onClick={() => setSimpleCalculatorOpen({ open: true, item: null })}
+            >
+              Калькулятор
+            </Button>
+
+            <Button
+              id="calculate-button"
+              variant="contained"
+              color="primary"
+              startIcon={<CalculateIcon />}
+              onClick={() => {
+                if (selectedItems.length > 0) {
+                  setCalculatorOpen(true);
+                } else {
+                  showNotification("Сначала выберите строки", "warning");
+                }
+              }}
+              disabled={selectedItems.length === 0 || processing}
+            >
+              Пересчитать ({selectedItems.length})
+            </Button>
+
+            <Button
+              variant="outlined"
+              color="primary"
+              startIcon={<SaveIcon />}
+              onClick={handleSave}
+              disabled={processing || items.length === 0}
+            >
+              Сохранить
+            </Button>
+
+            {/* Кнопка отправки на согласование - показываем только для черновиков */}
+            {sheetId && items.length > 0 && sheetStatus === "draft" && (
               <Button
-                id="calculate-button"
                 variant="contained"
-                color="primary"
-                startIcon={<CalculateIcon />}
-                onClick={() => {
-                  if (selectedItems.length > 0) {
-                    setCalculatorOpen(true);
-                  } else {
-                    showNotification("Сначала выберите строки", "warning");
-                  }
-                }}
-                disabled={selectedItems.length === 0 || processing}
-              >
-                Пересчитать ({selectedItems.length})
-              </Button>
-
-              <Button
-                variant="outlined"
-                color="primary"
-                startIcon={<SaveIcon />}
-                onClick={handleSave}
+                color="warning"
+                startIcon={<SendIcon />}
+                onClick={handleSubmitForApproval}
                 disabled={processing || items.length === 0}
               >
-                Сохранить
+                Отправить на согласование
               </Button>
+            )}
 
-              <Button
-                variant="outlined"
-                color="secondary"
-                startIcon={<DownloadIcon />}
-                onClick={() => {
-                  const useFormatted = window.confirm(
-                    "Выберите формат экспорта:\n\n" +
-                      "OK - Форматированный Excel (с ячейками)\n" +
-                      "Отмена - Простой XLS",
+            <Button
+              variant="outlined"
+              color="secondary"
+              startIcon={<DownloadIcon />}
+              onClick={() => {
+                const useFormatted = window.confirm(
+                  "Выберите формат экспорта:\n\n" +
+                  "OK - Форматированный Excel (с ячейками)\n" +
+                  "Отмена - Простой XLS",
+                );
+
+                if (useFormatted) {
+                  handleExportFormattedExcel();
+                } else {
+                  const useOldFormat = window.confirm(
+                    "OK - XLS (старый Excel 97-2003)\n" + "Отмена - CSV",
                   );
-
-                  if (useFormatted) {
-                    handleExportFormattedExcel();
+                  if (useOldFormat) {
+                    handleExportToExcel();
                   } else {
-                    const useOldFormat = window.confirm(
-                      "OK - XLS (старый Excel 97-2003)\n" + "Отмена - CSV",
-                    );
-                    if (useOldFormat) {
-                      handleExportToExcel();
-                    } else {
-                      handleExportToCSV();
-                    }
+                    handleExportToCSV();
                   }
-                }}
-                disabled={items.length === 0 || processing}
-              >
-                Экспорт
-              </Button>
-            </Box>
-          </Paper>
-
-          {processing && <LinearProgress sx={{ mb: 2 }} />}
-
-          <Paper sx={{ height: 600, width: "100%" }}>
-            <DataGrid
-              rows={items}
-              columns={columns}
-              checkboxSelection
-              loading={loading}
-              onRowSelectionModelChange={handleRowSelectionChange}
-              rowSelectionModel={selectedItems}
-              getRowId={(row) => row.id}
-              disableRowSelectionOnClick={false}
-              paginationModel={paginationModel}
-              onPaginationModelChange={setPaginationModel}
-              pageSizeOptions={[10, 25, 50]}
-              slots={{
-                toolbar: GridToolbar,
+                }
               }}
-              sx={{
-                "& .MuiDataGrid-cell:focus-within": {
-                  outline: "none",
-                },
-              }}
-            />
-          </Paper>
-        </Box>
-      )}
+              disabled={items.length === 0 || processing}
+            >
+              Экспорт
+            </Button>
+          </Box>
+        </Paper>
 
-      <Dialog
-        open={deleteDialogOpen}
-        onClose={() => setDeleteDialogOpen(false)}
-      >
-        <DialogTitle>Подтверждение удаления</DialogTitle>
-        <DialogContent>
-          <Typography>
-            {itemToDelete === "selected"
-              ? `Вы уверены, что хотите удалить ${selectedItems.length} выбранных строк?`
-              : "Вы уверены, что хотите удалить эту строку?"}
-          </Typography>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setDeleteDialogOpen(false)}>Отмена</Button>
-          <Button onClick={confirmDelete} color="error" variant="contained">
-            Удалить
-          </Button>
-        </DialogActions>
-      </Dialog>
+        {processing && <LinearProgress sx={{ mb: 2 }} />}
 
-      <MetalCalculatorModal
-        open={calculatorOpen}
-        onClose={() => setCalculatorOpen(false)}
-        onCalculate={handleCalculate}
-        selectedItems={selectedItems}
-        itemsData={items}
-        formulas={PROFILE_TYPES}
-      />
+        <Paper sx={{ height: 600, width: "100%" }}>
+          <DataGrid
+            rows={items}
+            columns={columns}
+            checkboxSelection
+            loading={loading}
+            onRowSelectionModelChange={handleRowSelectionChange}
+            rowSelectionModel={selectedItems}
+            getRowId={(row) => row.id}
+            disableRowSelectionOnClick={false}
+            paginationModel={paginationModel}
+            onPaginationModelChange={setPaginationModel}
+            pageSizeOptions={[10, 25, 50]}
+            slots={{
+              toolbar: GridToolbar,
+            }}
+            sx={{
+              "& .MuiDataGrid-cell:focus-within": {
+                outline: "none",
+              },
+            }}
+          />
+        </Paper>
+      </Box>
+    )}
 
-      <SimpleCalculatorModal
-        open={simpleCalculatorOpen?.open || false}
-        onClose={() => setSimpleCalculatorOpen({ open: false, item: null })}
-        onCalculate={handleSimpleCalculate}
-        item={simpleCalculatorOpen?.item}
-        itemsData={items}
-        formulas={PROFILE_TYPES}
-      />
+    <Dialog open={deleteDialogOpen} onClose={() => setDeleteDialogOpen(false)}>
+      <DialogTitle>Подтверждение удаления</DialogTitle>
+      <DialogContent>
+        <Typography>
+          {itemToDelete === "selected"
+            ? `Вы уверены, что хотите удалить ${selectedItems.length} выбранных строк?`
+            : "Вы уверены, что хотите удалить эту строку?"}
+        </Typography>
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={() => setDeleteDialogOpen(false)}>Отмена</Button>
+        <Button onClick={confirmDelete} color="error" variant="contained">
+          Удалить
+        </Button>
+      </DialogActions>
+    </Dialog>
 
-      <EditCellModal
-        open={editModalOpen}
-        onClose={() => {
-          setEditModalOpen(false);
-          setEditCellData(null);
-        }}
-        onSave={handleEditModalSave}
-        cellData={editCellData}
-      />
+    <MetalCalculatorModal
+      open={calculatorOpen}
+      onClose={() => setCalculatorOpen(false)}
+      onCalculate={handleCalculate}
+      selectedItems={selectedItems}
+      itemsData={items}
+      formulas={PROFILE_TYPES}
+    />
 
-      <Snackbar
-        open={notification.open}
-        autoHideDuration={6000}
-        onClose={() => setNotification({ ...notification, open: false })}
-      >
-        <Alert severity={notification.severity}>{notification.message}</Alert>
-      </Snackbar>
-    </Box>
-  );
+    <SimpleCalculatorModal
+      open={simpleCalculatorOpen?.open || false}
+      onClose={() => setSimpleCalculatorOpen({ open: false, item: null })}
+      onCalculate={handleSimpleCalculate}
+      item={simpleCalculatorOpen?.item}
+      itemsData={items}
+      formulas={PROFILE_TYPES}
+    />
+
+    <EditCellModal
+      open={editModalOpen}
+      onClose={() => {
+        setEditModalOpen(false);
+        setEditCellData(null);
+      }}
+      onSave={handleEditModalSave}
+      cellData={editCellData}
+    />
+
+    <Snackbar
+      open={notification.open}
+      autoHideDuration={6000}
+      onClose={() => setNotification({ ...notification, open: false })}
+    >
+      <Alert severity={notification.severity}>{notification.message}</Alert>
+    </Snackbar>
+  </Box>
+);
+
+  // // ========== РЕНДЕР ==========
+  // return (
+  //   <Box sx={{ p: 3 }}>
+  //     <Typography variant="h4" gutterBottom>
+  //       Дефектная ведомость
+  //       {connectionStatus === "connected" && (
+  //         <Chip
+  //           label="WebSocket подключен"
+  //           color="success"
+  //           size="small"
+  //           sx={{ ml: 2 }}
+  //         />
+  //       )}
+  //     </Typography>
+
+  //     {!batchId ? (
+  //       <DefectSheetUploader onUploadSuccess={handleUploadSuccess} />
+  //     ) : (
+  //       <Box>
+  //         <Paper sx={{ p: 2, mb: 2 }}>
+  //           <Box
+  //             sx={{
+  //               display: "flex",
+  //               gap: 2,
+  //               alignItems: "center",
+  //               flexWrap: "wrap",
+  //             }}
+  //           >
+  //             <Typography variant="subtitle1">Batch ID: {batchId}</Typography>
+  //             <Chip
+  //               label={processing ? "Обработка..." : "Готово"}
+  //               color={processing ? "warning" : "success"}
+  //             />
+  //             <Chip
+  //               label={`Записей: ${items.length}`}
+  //               color="info"
+  //               variant="outlined"
+  //             />
+  //             <Chip
+  //               label={`Выбрано: ${selectedItems.length}`}
+  //               color={selectedItems.length > 0 ? "primary" : "default"}
+  //               variant="outlined"
+  //             />
+
+  //             <Box sx={{ flexGrow: 1 }} />
+
+  //             <Tooltip title="Обновить">
+  //               <IconButton onClick={handleRefresh} disabled={loading}>
+  //                 <RefreshIcon />
+  //               </IconButton>
+  //             </Tooltip>
+
+  //             <Button
+  //               variant="outlined"
+  //               color="warning"
+  //               size="small"
+  //               onClick={handleTestSelect}
+  //               disabled={items.length === 0}
+  //             >
+  //               Выбрать первый
+  //             </Button>
+
+  //             <Button
+  //               variant="outlined"
+  //               color="warning"
+  //               size="small"
+  //               onClick={handleSelectAll}
+  //               disabled={items.length === 0}
+  //             >
+  //               Выбрать все
+  //             </Button>
+
+  //             <Button
+  //               variant="outlined"
+  //               color="warning"
+  //               size="small"
+  //               onClick={handleClearSelection}
+  //               disabled={selectedItems.length === 0}
+  //             >
+  //               Очистить
+  //             </Button>
+
+  //             <Button
+  //               variant="outlined"
+  //               color="error"
+  //               size="small"
+  //               startIcon={<DeleteSweepIcon />}
+  //               onClick={handleDeleteSelected}
+  //               disabled={selectedItems.length === 0}
+  //             >
+  //               Удалить выбранные ({selectedItems.length})
+  //             </Button>
+
+  //             <Button
+  //               variant="contained"
+  //               color="secondary"
+  //               startIcon={<CalculatorIcon />}
+  //               onClick={() =>
+  //                 setSimpleCalculatorOpen({ open: true, item: null })
+  //               }
+  //             >
+  //               Калькулятор
+  //             </Button>
+
+  //             <Button
+  //               id="calculate-button"
+  //               variant="contained"
+  //               color="primary"
+  //               startIcon={<CalculateIcon />}
+  //               onClick={() => {
+  //                 if (selectedItems.length > 0) {
+  //                   setCalculatorOpen(true);
+  //                 } else {
+  //                   showNotification("Сначала выберите строки", "warning");
+  //                 }
+  //               }}
+  //               disabled={selectedItems.length === 0 || processing}
+  //             >
+  //               Пересчитать ({selectedItems.length})
+  //             </Button>
+
+  //             <Button
+  //               variant="outlined"
+  //               color="primary"
+  //               startIcon={<SaveIcon />}
+  //               onClick={handleSave}
+  //               disabled={processing || items.length === 0}
+  //             >
+  //               Сохранить
+  //             </Button>
+
+  //             {/* Кнопка отправки на согласование */}
+  //             {sheetId && items.length > 0 && sheetStatus === "draft" && (
+  //               <Button
+  //                 variant="contained"
+  //                 color="warning"
+  //                 startIcon={<SendIcon />}
+  //                 onClick={handleSubmitForApproval}
+  //                 disabled={processing || items.length === 0}
+  //               >
+  //                 Отправить на согласование
+  //               </Button>
+  //             )}
+
+  //             {/* Индикатор статуса */}
+  //             {sheetStatus && sheetStatus !== "draft" && (
+  //               <Chip
+  //                 label={
+  //                   sheetStatus === "pending"
+  //                     ? "Ожидает согласования"
+  //                     : sheetStatus === "approved"
+  //                       ? "✓ Согласовано"
+  //                       : sheetStatus === "rejected"
+  //                         ? "✗ Отклонено"
+  //                         : ""
+  //                 }
+  //                 color={
+  //                   sheetStatus === "pending"
+  //                     ? "warning"
+  //                     : sheetStatus === "approved"
+  //                       ? "success"
+  //                       : sheetStatus === "rejected"
+  //                         ? "error"
+  //                         : "default"
+  //                 }
+  //                 variant="filled"
+  //               />
+  //             )}
+
+  //             <Button
+  //               variant="outlined"
+  //               color="secondary"
+  //               startIcon={<DownloadIcon />}
+  //               onClick={() => {
+  //                 const useFormatted = window.confirm(
+  //                   "Выберите формат экспорта:\n\n" +
+  //                     "OK - Форматированный Excel (с ячейками)\n" +
+  //                     "Отмена - Простой XLS",
+  //                 );
+
+  //                 if (useFormatted) {
+  //                   handleExportFormattedExcel();
+  //                 } else {
+  //                   const useOldFormat = window.confirm(
+  //                     "OK - XLS (старый Excel 97-2003)\n" + "Отмена - CSV",
+  //                   );
+  //                   if (useOldFormat) {
+  //                     handleExportToExcel();
+  //                   } else {
+  //                     handleExportToCSV();
+  //                   }
+  //                 }
+  //               }}
+  //               disabled={items.length === 0 || processing}
+  //             >
+  //               Экспорт
+  //             </Button>
+  //           </Box>
+  //         </Paper>
+
+  //         {processing && <LinearProgress sx={{ mb: 2 }} />}
+
+  //         <Paper sx={{ height: 600, width: "100%" }}>
+  //           <DataGrid
+  //             rows={items}
+  //             columns={columns}
+  //             checkboxSelection
+  //             loading={loading}
+  //             onRowSelectionModelChange={handleRowSelectionChange}
+  //             rowSelectionModel={selectedItems}
+  //             getRowId={(row) => row.id}
+  //             disableRowSelectionOnClick={false}
+  //             paginationModel={paginationModel}
+  //             onPaginationModelChange={setPaginationModel}
+  //             pageSizeOptions={[10, 25, 50]}
+  //             slots={{
+  //               toolbar: GridToolbar,
+  //             }}
+  //             sx={{
+  //               "& .MuiDataGrid-cell:focus-within": {
+  //                 outline: "none",
+  //               },
+  //             }}
+  //           />
+  //         </Paper>
+  //       </Box>
+  //     )}
+
+  //     <Dialog
+  //       open={deleteDialogOpen}
+  //       onClose={() => setDeleteDialogOpen(false)}
+  //     >
+  //       <DialogTitle>Подтверждение удаления</DialogTitle>
+  //       <DialogContent>
+  //         <Typography>
+  //           {itemToDelete === "selected"
+  //             ? `Вы уверены, что хотите удалить ${selectedItems.length} выбранных строк?`
+  //             : "Вы уверены, что хотите удалить эту строку?"}
+  //         </Typography>
+  //       </DialogContent>
+  //       <DialogActions>
+  //         <Button onClick={() => setDeleteDialogOpen(false)}>Отмена</Button>
+  //         <Button onClick={confirmDelete} color="error" variant="contained">
+  //           Удалить
+  //         </Button>
+  //       </DialogActions>
+  //     </Dialog>
+
+  //     <MetalCalculatorModal
+  //       open={calculatorOpen}
+  //       onClose={() => setCalculatorOpen(false)}
+  //       onCalculate={handleCalculate}
+  //       selectedItems={selectedItems}
+  //       itemsData={items}
+  //       formulas={PROFILE_TYPES}
+  //     />
+
+  //     <SimpleCalculatorModal
+  //       open={simpleCalculatorOpen?.open || false}
+  //       onClose={() => setSimpleCalculatorOpen({ open: false, item: null })}
+  //       onCalculate={handleSimpleCalculate}
+  //       item={simpleCalculatorOpen?.item}
+  //       itemsData={items}
+  //       formulas={PROFILE_TYPES}
+  //     />
+
+  //     <EditCellModal
+  //       open={editModalOpen}
+  //       onClose={() => {
+  //         setEditModalOpen(false);
+  //         setEditCellData(null);
+  //       }}
+  //       onSave={handleEditModalSave}
+  //       cellData={editCellData}
+  //     />
+
+  //     <Snackbar
+  //       open={notification.open}
+  //       autoHideDuration={6000}
+  //       onClose={() => setNotification({ ...notification, open: false })}
+  //     >
+  //       <Alert severity={notification.severity}>{notification.message}</Alert>
+  //     </Snackbar>
+  //   </Box>
+  // );
 };
 
 export default DefectSheetPage;

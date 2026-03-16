@@ -72,3 +72,10 @@ docker exec -it registry_postgres psql -U admin -d account_registry
 # (Внутри psql) Посмотрите, есть ли уже таблицы
 \dt
 \q
+
+# Сразу сохраняете в requirements.txt после установки новых пакетов -золотое правило
+pip freeze > requirements.txt
+ 
+  admin / admin123  (администратор)
+   approver / approver123  (согласователь)
+   user / user123  (обычный пользователь)
