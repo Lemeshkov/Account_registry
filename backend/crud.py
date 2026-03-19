@@ -345,6 +345,8 @@ def create_defect_sheet(
     db.flush()
     return sheet
 
+
+
 def create_defect_sheet_items(db: Session, sheet_id: int, items_data: List[Dict]):
     """Создать строки дефектной ведомости"""
     created_items = []
@@ -383,8 +385,41 @@ def create_defect_sheet_items(db: Session, sheet_id: int, items_data: List[Dict]
         db.add(db_item)
         created_items.append(db_item)
     
+    # Сначала делаем flush, чтобы получить ID созданных элементов
     db.flush()
+    
+    # После создания всех элементов обновляем счетчик в ведомости
+    if created_items:
+        # Вызываем функцию обновления счетчика
+        update_defect_sheet_items_count(db, sheet_id)
+        print(f"📊 Updated sheet {sheet_id} total_items to {len(created_items)}")
+    
     return created_items
+
+def update_defect_sheet_items_count(db: Session, sheet_id: int):
+    """
+    Обновить total_items в ведомости на основе фактического количества строк
+    Вызывать после создания, удаления или изменения элементов
+    """
+    # Подсчитываем количество элементов
+    count = db.query(func.count(models.DefectSheetItem.id)).filter(
+        models.DefectSheetItem.sheet_id == sheet_id
+    ).scalar() or 0
+    
+    # Обновляем поле total_items в ведомости
+    db.query(models.DefectSheet).filter(
+        models.DefectSheet.id == sheet_id
+    ).update(
+        {"total_items": count},
+        synchronize_session=False  # Важно для корректного обновления
+    )
+    
+    # Логируем для отладки
+    print(f"📊 Updated defect sheet {sheet_id} total_items to {count}")
+    
+    # Не делаем commit здесь, чтобы можно было использовать в транзакциях
+    # Commit должен быть на уровне вызывающей функции
+
 
 def get_defect_sheet(db: Session, sheet_id: int) -> Optional[models.DefectSheet]:
     """Получить дефектную ведомость по ID"""
@@ -440,14 +475,3 @@ def delete_defect_sheet(db: Session, sheet_id: int):
     db.query(models.DefectSheet).filter(models.DefectSheet.id == sheet_id).delete()
     db.flush()
 
-# def create_defect_sheet(db: Session, batch_id: str, file_name: str) -> models.DefectSheet:
-#     """Создает запись о дефектной ведомости"""
-#     sheet = models.DefectSheet(
-#         batch_id=batch_id,
-#         file_name=file_name,
-#         status="pending",
-#         # uploaded_at=datetime.now()
-#     )
-#     db.add(sheet)
-#     db.flush()
-#     return sheet    
