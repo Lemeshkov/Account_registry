@@ -1116,7 +1116,7 @@ async def upload_defect_sheet(
     file: UploadFile = File(...),
     batch_id: Optional[str] = Form(None),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)  # Добавляем текущего пользователя
+    current_user: User = Depends(get_current_active_user)
 ):
     ext = file.filename.split(".")[-1].lower()
     if ext not in ("xlsx", "xls"):
@@ -1129,20 +1129,30 @@ async def upload_defect_sheet(
     with open(file_path, "wb") as f:
         shutil.copyfileobj(file.file, f)
     
-    # Передаем user_id в функцию создания
+    # Создаем ведомость с user_id текущего пользователя
     sheet = create_defect_sheet(
         db=db, 
         file_name=file.filename, 
         batch_id=batch_id,
-        user_id=current_user.id  # Передаем ID текущего пользователя
+        user_id=current_user.id
     )
     db.commit()
+    
+    # Уведомляем создателя о начале обработки
+    await websocket_manager.send_to_user(str(current_user.id), {
+        "type": "defect_sheet_uploaded",
+        "sheet_id": sheet.id,
+        "batch_id": batch_id,
+        "status": "processing",
+        "message": "Файл загружен, начинается обработка"
+    })
     
     background_tasks.add_task(
         process_defect_sheet_background,
         file_path,
         batch_id,
-        file.filename
+        file.filename,
+        current_user.id
     )
     
     await websocket_manager.broadcast_to_batch(batch_id, {
@@ -1160,7 +1170,8 @@ async def upload_defect_sheet(
         "status": "processing"
     }
 
-def process_defect_sheet_background(file_path: Path, batch_id: str, original_filename: str):
+
+def process_defect_sheet_background(file_path: Path, batch_id: str, original_filename: str, user_id: int = None):
     db = SessionLocal()
     sheet = None
     items = []
@@ -1198,16 +1209,12 @@ def process_defect_sheet_background(file_path: Path, batch_id: str, original_fil
         sheet = get_defect_sheet_by_batch(db, batch_id)
         if not sheet:
             log.warning(f"[DEFECT] Sheet not found for batch {batch_id}, creating new one")
-            # ИСПРАВЛЕНО: Используем правильный порядок параметров
-            # В crud.py у нас теперь одна функция create_defect_sheet с параметрами:
-            # create_defect_sheet(db, file_name, batch_id, user_id)
-            # Но здесь у нас нет user_id, поэтому передаем None
             from crud import create_defect_sheet
             sheet = create_defect_sheet(
                 db=db,
                 file_name=original_filename,
                 batch_id=batch_id,
-                user_id=None  # В фоновой задаче нет пользователя
+                user_id=user_id
             )
             log.info(f"[DEFECT] Created new sheet with id {sheet.id}")
         
@@ -1251,6 +1258,19 @@ def process_defect_sheet_background(file_path: Path, batch_id: str, original_fil
             loop.run_until_complete(
                 websocket_manager.broadcast_to_batch(batch_id, message)
             )
+            
+            # Уведомляем создателя о завершении обработки
+            if user_id:
+                loop.run_until_complete(
+                    websocket_manager.send_to_user(str(user_id), {
+                        "type": "defect_sheet_ready",
+                        "sheet_id": sheet.id,
+                        "batch_id": batch_id,
+                        "total_items": len(items),
+                        "message": f"Ведомость обработана, найдено {len(items)} позиций"
+                    })
+                )
+            
             loop.close()
             
         except Exception as ws_error:
@@ -1276,11 +1296,194 @@ def process_defect_sheet_background(file_path: Path, batch_id: str, original_fil
                     "error": str(e)
                 })
             )
+            # Уведомляем создателя об ошибке
+            if user_id:
+                loop.run_until_complete(
+                    websocket_manager.send_to_user(str(user_id), {
+                        "type": "defect_sheet_error",
+                        "sheet_id": sheet.id if sheet else None,
+                        "batch_id": batch_id,
+                        "error": str(e),
+                        "message": f"Ошибка обработки файла: {str(e)}"
+                    })
+                )
             loop.close()
         except:
             pass
     finally:
         db.close()
+
+# @app.post("/api/defect/upload")
+# async def upload_defect_sheet(
+#     background_tasks: BackgroundTasks,
+#     file: UploadFile = File(...),
+#     batch_id: Optional[str] = Form(None),
+#     db: Session = Depends(get_db),
+#     current_user: User = Depends(get_current_active_user)  # Добавляем текущего пользователя
+# ):
+#     ext = file.filename.split(".")[-1].lower()
+#     if ext not in ("xlsx", "xls"):
+#         raise HTTPException(400, "Поддерживаются только Excel файлы (.xlsx, .xls)")
+    
+#     if not batch_id:
+#         batch_id = str(uuid.uuid4())
+    
+#     file_path = DEFECT_UPLOAD_DIR / f"{batch_id}_{file.filename}"
+#     with open(file_path, "wb") as f:
+#         shutil.copyfileobj(file.file, f)
+    
+#     # Передаем user_id в функцию создания
+#     sheet = create_defect_sheet(
+#         db=db, 
+#         file_name=file.filename, 
+#         batch_id=batch_id,
+#         user_id=current_user.id  # Передаем ID текущего пользователя
+#     )
+#     db.commit()
+    
+#     background_tasks.add_task(
+#         process_defect_sheet_background,
+#         file_path,
+#         batch_id,
+#         file.filename
+#     )
+    
+#     await websocket_manager.broadcast_to_batch(batch_id, {
+#         "type": "defect_sheet_processing",
+#         "batch_id": batch_id,
+#         "sheet_id": sheet.id,
+#         "status": "processing",
+#         "message": "Файл принят, начинаем парсинг"
+#     })
+    
+#     return {
+#         "message": "Файл принят в обработку",
+#         "batch_id": batch_id,
+#         "sheet_id": sheet.id,
+#         "status": "processing"
+#     }
+
+# def process_defect_sheet_background(file_path: Path, batch_id: str, original_filename: str):
+#     db = SessionLocal()
+#     sheet = None
+#     items = []
+#     metadata = {}
+    
+#     try:
+#         log.info(f"[DEFECT] Starting parsing of {file_path.name}")
+        
+#         # Отправляем статус через WebSocket
+#         try:
+#             loop = asyncio.new_event_loop()
+#             asyncio.set_event_loop(loop)
+#             loop.run_until_complete(
+#                 websocket_manager.broadcast_to_batch(batch_id, {
+#                     "type": "defect_sheet_status",
+#                     "batch_id": batch_id,
+#                     "status": "parsing",
+#                     "progress": 30
+#                 })
+#             )
+#             loop.close()
+#         except Exception as ws_error:
+#             log.warning(f"WebSocket status update failed: {ws_error}")
+        
+#         # Парсим файл
+#         try:
+#             items, metadata = parse_defect_sheet(file_path)
+#             log.info(f"[DEFECT] Parsed {len(items)} items")
+#         except Exception as parse_error:
+#             log.exception(f"[DEFECT] Parse error: {parse_error}")
+#             items = []
+#             metadata = {"error": str(parse_error)}
+        
+#         # Получаем существующий sheet
+#         sheet = get_defect_sheet_by_batch(db, batch_id)
+#         if not sheet:
+#             log.warning(f"[DEFECT] Sheet not found for batch {batch_id}, creating new one")
+#             # ИСПРАВЛЕНО: Используем правильный порядок параметров
+#             # В crud.py у нас теперь одна функция create_defect_sheet с параметрами:
+#             # create_defect_sheet(db, file_name, batch_id, user_id)
+#             # Но здесь у нас нет user_id, поэтому передаем None
+#             from crud import create_defect_sheet
+#             sheet = create_defect_sheet(
+#                 db=db,
+#                 file_name=original_filename,
+#                 batch_id=batch_id,
+#                 user_id=None  # В фоновой задаче нет пользователя
+#             )
+#             log.info(f"[DEFECT] Created new sheet with id {sheet.id}")
+        
+#         # Обновляем метаданные
+#         if metadata.get("period_start"):
+#             sheet.period_start = metadata["period_start"]
+#         if metadata.get("period_end"):
+#             sheet.period_end = metadata["period_end"]
+        
+#         # Сохраняем элементы
+#         if items:
+#             try:
+#                 create_defect_sheet_items(db, sheet.id, items)
+#                 log.info(f"[DEFECT] Saved {len(items)} items to DB")
+#             except Exception as db_error:
+#                 log.exception(f"[DEFECT] DB save error: {db_error}")
+        
+#         # Обновляем статус и общее количество
+#         sheet.status = "processed" if items else "no_data"
+#         sheet.total_items = len(items)
+#         db.commit()
+        
+#         # Небольшая задержка перед отправкой финального статуса
+#         time.sleep(1)
+        
+#         # Отправляем финальный статус
+#         try:
+#             loop = asyncio.new_event_loop()
+#             asyncio.set_event_loop(loop)
+            
+#             message = {
+#                 "type": "defect_sheet_processed",
+#                 "batch_id": batch_id,
+#                 "sheet_id": sheet.id,
+#                 "status": "processed",
+#                 "total_items": len(items),
+#                 "metadata": metadata
+#             }
+            
+#             log.info(f"📤 Sending WebSocket message: {message}")
+#             loop.run_until_complete(
+#                 websocket_manager.broadcast_to_batch(batch_id, message)
+#             )
+#             loop.close()
+            
+#         except Exception as ws_error:
+#             log.error(f"Failed to send WebSocket notification: {ws_error}")
+        
+#         log.info(f"[DEFECT] Successfully processed {file_path.name}")
+        
+#     except Exception as e:
+#         log.exception(f"[DEFECT] Error processing {file_path.name}: {e}")
+        
+#         if sheet:
+#             sheet.status = "error"
+#             db.commit()
+        
+#         # Отправляем ошибку
+#         try:
+#             loop = asyncio.new_event_loop()
+#             asyncio.set_event_loop(loop)
+#             loop.run_until_complete(
+#                 websocket_manager.broadcast_to_batch(batch_id, {
+#                     "type": "defect_sheet_error",
+#                     "batch_id": batch_id,
+#                     "error": str(e)
+#                 })
+#             )
+#             loop.close()
+#         except:
+#             pass
+#     finally:
+#         db.close()
 
 @app.get("/api/defect/{batch_id}/preview", response_model=DefectSheetPreviewResponse)
 def preview_defect_sheet(batch_id: str, db: Session = Depends(get_db)):
@@ -1512,62 +1715,7 @@ async def submit_defect_sheet_for_approval(
         "message": "Ведомость отправлена на согласование"
     }
 
-@app.post("/api/defect/approve")
-async def approve_defect_sheet(
-    request: ApprovalRequest,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
-):
-    if current_user.role not in ["approver", "admin"]:
-        raise HTTPException(403, "Только согласователи могут выполнять это действие")
-    
-    sheet = db.query(DefectSheet).filter(DefectSheet.id == request.sheet_id).first()
-    if not sheet:
-        raise HTTPException(404, "Дефектная ведомость не найдена")
-    
-    if sheet.status != "pending":
-        raise HTTPException(400, f"Ведомость уже {sheet.status}")
-    
-    if request.approved:
-        sheet.status = "approved"
-        sheet.approved_at = datetime.now()
-        sheet.approved_by = current_user.id
-        sheet.approval_comment = request.comment
-        
-        message = f"Ведомость #{sheet.id} согласована"
-        notification_type = "approval_approved"
-    else:
-        sheet.status = "rejected"
-        sheet.rejected_at = datetime.now()
-        sheet.rejected_by = current_user.id
-        sheet.rejection_reason = request.comment
-        
-        message = f"Ведомость #{sheet.id} отклонена"
-        notification_type = "approval_rejected"
-    
-    db.query(ApprovalNotification).filter(
-        ApprovalNotification.sheet_id == sheet.id,
-        ApprovalNotification.status == "unread"
-    ).update({"status": "processed", "processed_at": datetime.now()})
-    
-    db.commit()
-    
-    if sheet.created_by:
-        asyncio.create_task(websocket_manager.send_to_user(str(sheet.created_by), {
-            "type": notification_type,
-            "sheet_id": sheet.id,
-            "batch_id": sheet.batch_id,
-            "message": message,
-            "comment": request.comment,
-            "approved_by": current_user.full_name or current_user.username,
-            "approved_at": datetime.now().isoformat()
-        }))
-    
-    return {
-        "status": sheet.status,
-        "sheet_id": sheet.id,
-        "message": message
-    }
+
 
 @app.get("/api/defect/pending-approvals")
 async def get_pending_approvals(
@@ -2078,6 +2226,89 @@ async def update_defect_item_field(
         "value": request.value
     }
 
+
+
+@app.post("/api/defect/approve")
+async def approve_defect_sheet(
+    request: ApprovalRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    if current_user.role not in ["approver", "admin"]:
+        raise HTTPException(403, "Только согласователи могут выполнять это действие")
+    
+    sheet = db.query(DefectSheet).filter(DefectSheet.id == request.sheet_id).first()
+    if not sheet:
+        raise HTTPException(404, "Дефектная ведомость не найдена")
+    
+    if sheet.status != "pending":
+        raise HTTPException(400, f"Ведомость уже {sheet.status}")
+    
+    approver_name = current_user.full_name or current_user.username
+    
+    if request.approved:
+        sheet.status = "approved"
+        sheet.approved_at = datetime.now()
+        sheet.approved_by = current_user.id
+        sheet.approval_comment = request.comment
+        
+        message = f"Ведомость #{sheet.id} согласована"
+        notification_type = "approval_approved"
+        color = "success"
+    else:
+        sheet.status = "rejected"
+        sheet.rejected_at = datetime.now()
+        sheet.rejected_by = current_user.id
+        sheet.rejection_reason = request.comment
+        
+        message = f"Ведомость #{sheet.id} отклонена"
+        notification_type = "approval_rejected"
+        color = "error"
+    
+    # Отмечаем уведомления как обработанные
+    db.query(ApprovalNotification).filter(
+        ApprovalNotification.sheet_id == sheet.id,
+        ApprovalNotification.status == "unread"
+    ).update({"status": "processed", "processed_at": datetime.now()})
+    
+    db.commit()
+    
+    # Уведомляем создателя о результате
+    if sheet.created_by:
+        asyncio.create_task(websocket_manager.send_to_user(str(sheet.created_by), {
+            "type": notification_type,
+            "sheet_id": sheet.id,
+            "batch_id": sheet.batch_id,
+            "message": message,
+            "comment": request.comment,
+            "approved_by": approver_name,
+            "approved_at": datetime.now().isoformat(),
+            "status": sheet.status
+        }))
+    
+    # Уведомляем всех согласователей об изменении статуса
+    other_approvers = db.query(User).filter(
+        User.role.in_(["approver", "admin"]),
+        User.id != current_user.id
+    ).all()
+    
+    for approver in other_approvers:
+        asyncio.create_task(websocket_manager.send_to_user(str(approver.id), {
+            "type": "approval_processed",
+            "sheet_id": sheet.id,
+            "batch_id": sheet.batch_id,
+            "message": f"Ведомость #{sheet.id} {message.lower()} пользователем {approver_name}",
+            "processed_by": approver_name,
+            "processed_at": datetime.now().isoformat(),
+            "status": sheet.status
+        }))
+    
+    return {
+        "status": sheet.status,
+        "sheet_id": sheet.id,
+        "message": message
+    }
+
 # -------------------------------------------------------------------
 # WEB SOCKET SUPPORT
 # -------------------------------------------------------------------
@@ -2240,3 +2471,30 @@ async def startup_event():
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
+    
+    #-------------------------------------------------------------
+    #Эндпоинт для согласования
+    #-----------------------------------------------------------------------
+
+@app.get("/api/defect/{sheet_id}/info")
+def get_defect_sheet_info(sheet_id: int, db: Session = Depends(get_db)):
+    """Получить информацию о ведомости по ID"""
+    sheet = db.query(DefectSheet).filter(DefectSheet.id == sheet_id).first()
+    if not sheet:
+        raise HTTPException(404, "Дефектная ведомость не найдена")
+    
+    return {
+        "id": sheet.id,
+        "batch_id": sheet.batch_id,
+        "file_name": sheet.file_name,
+        "status": sheet.status,
+        "total_items": sheet.total_items,
+        "created_at": sheet.created_at,
+        "submitted_at": sheet.submitted_at,
+        "approved_at": sheet.approved_at,
+        "rejected_at": sheet.rejected_at
+    }
+
+
+
+

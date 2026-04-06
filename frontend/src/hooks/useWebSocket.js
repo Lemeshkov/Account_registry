@@ -1,9 +1,38 @@
+
 import { useEffect, useRef, useState } from "react";
 
-export const useWebSocket = (batchId) => {
+export const useWebSocket = (batchId = null) => {
   const [lastMessage, setLastMessage] = useState(null);
   const [connectionStatus, setConnectionStatus] = useState("disconnected");
+  const [isSubscribed, setIsSubscribed] = useState(false);
   const wsRef = useRef(null);
+  const batchIdRef = useRef(batchId);
+  const pendingSubscriptionRef = useRef(null);
+
+  // Обновляем ref при изменении batchId
+  useEffect(() => {
+    batchIdRef.current = batchId;
+  }, [batchId]);
+
+  // Функция для подписки на batch
+  const subscribeToBatch = (newBatchId) => {
+    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+      // Если WebSocket еще не готов, сохраняем запрос на подписку
+      console.log(`⏳ WebSocket not ready, saving pending subscription for batch: ${newBatchId}`);
+      pendingSubscriptionRef.current = newBatchId;
+      return;
+    }
+    
+    if (newBatchId) {
+      console.log(`📡 Subscribing to batch: ${newBatchId}`);
+      const subscribeMsg = {
+        type: "subscribe",
+        batch_id: newBatchId,
+      };
+      wsRef.current.send(JSON.stringify(subscribeMsg));
+      setIsSubscribed(true);
+    }
+  };
 
   // Отдельный useEffect для логирования сообщений
   useEffect(() => {
@@ -13,32 +42,26 @@ export const useWebSocket = (batchId) => {
     }
   }, [lastMessage]);
 
-  // Основной useEffect для подключения
+  // Основной useEffect для подключения (создаем соединение один раз)
   useEffect(() => {
-    if (!batchId) {
-      console.log('⚠️ No batchId provided, skipping WebSocket connection');
-      return;
-    }
-
     // Генерируем уникальный ID для клиента
     const clientId = `client_${Math.random().toString(36).substr(2, 9)}`;
-    console.log(`🔌 Connecting WebSocket with clientId: ${clientId}, batchId: ${batchId}`);
+    console.log(`🔌 Connecting WebSocket with clientId: ${clientId}`);
 
-    // Создаем WebSocket соединение
+    // Создаем WebSocket соединение сразу (без batchId)
     const ws = new WebSocket(`ws://localhost:8000/ws/${clientId}`);
     wsRef.current = ws;
 
     ws.onopen = () => {
       console.log("✅ WebSocket connected successfully");
       setConnectionStatus("connected");
-
-      // Подписываемся на batch
-      const subscribeMsg = {
-        type: "subscribe",
-        batch_id: batchId,
-      };
-      console.log("📤 Sending subscribe message:", subscribeMsg);
-      ws.send(JSON.stringify(subscribeMsg));
+      
+      // Если есть ожидающая подписка, выполняем её
+      if (pendingSubscriptionRef.current) {
+        console.log(`📡 Executing pending subscription for batch: ${pendingSubscriptionRef.current}`);
+        subscribeToBatch(pendingSubscriptionRef.current);
+        pendingSubscriptionRef.current = null;
+      }
     };
 
     ws.onmessage = (event) => {
@@ -73,6 +96,7 @@ export const useWebSocket = (batchId) => {
         wasClean: event.wasClean
       });
       setConnectionStatus("disconnected");
+      setIsSubscribed(false);
     };
 
     // Очистка при размонтировании
@@ -82,7 +106,14 @@ export const useWebSocket = (batchId) => {
         ws.close();
       }
     };
-  }, [batchId]);
+  }, []); // Пустой массив зависимостей - создаем соединение один раз
+
+  // Подписываемся при изменении batchId (если он передан через пропс)
+  useEffect(() => {
+    if (batchId && connectionStatus === "connected") {
+      subscribeToBatch(batchId);
+    }
+  }, [batchId, connectionStatus]);
 
   // Функция для отправки сообщений
   const sendMessage = (message) => {
@@ -94,5 +125,11 @@ export const useWebSocket = (batchId) => {
     }
   };
 
-  return { lastMessage, connectionStatus, sendMessage };
+  return { 
+    lastMessage, 
+    connectionStatus, 
+    sendMessage, 
+    isSubscribed, 
+    subscribeToBatch 
+  };
 };

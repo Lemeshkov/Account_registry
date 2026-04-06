@@ -248,7 +248,7 @@ const ApprovalsPage = () => {
 
   // Просмотр ведомости
   const viewSheet = (sheetId) => {
-    window.open(`/defect-sheet/${sheetId}`, '_blank');
+    navigate(`/defect-sheet/${sheetId}`); // Используем navigate вместо window.open
   };
 
   // Экспорт в Excel
