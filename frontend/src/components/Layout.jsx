@@ -17,46 +17,35 @@
 //   CheckCircle as CheckCircleIcon,
 //   Assignment as AssignmentIcon,
 //   Logout as LogoutIcon,
-//   Notifications as NotificationsIcon,
 // } from '@mui/icons-material';
 // import { useAuth } from '../context/AuthContext';
 // import ApprovalNotifications from './ApprovalNotifications';
-// import { useWebSocket } from '../hooks/useWebSocket';
 // import NotificationSnackbar from './NotificationSnackbar';
 
 // const Layout = () => {
-//   const { user, logout } = useAuth();
+//   const { user, logout, lastWebSocketMessage, wsConnected } = useAuth(); // <-- Добавили wsConnected
 //   const navigate = useNavigate();
 //   const location = useLocation();
-//   const { lastMessage, connectionStatus, sendMessage } = useWebSocket('layout');
-  
-//   // WebSocket аутентификация при загрузке пользователя
-//   useEffect(() => {
-//     if (user && user.id && sendMessage) {
-//       sendMessage({
-//         type: 'authenticate',
-//         user_id: String(user.id)
-//       });
-//     }
-//   }, [user, sendMessage]);
 
 //   // Обработка уведомлений
 //   useEffect(() => {
-//     if (lastMessage) {
-//       console.log('📨 Layout received notification:', lastMessage);
+//     if (lastWebSocketMessage) {
+//       console.log('📨 Layout received notification:', lastWebSocketMessage);
       
 //       // Показываем всплывающее уведомление
-//       if (lastMessage.type === 'approval_request') {
-//         showBrowserNotification('📬 Новая ведомость на согласование', lastMessage.message);
-//       } else if (lastMessage.type === 'approval_approved') {
-//         showBrowserNotification('✅ Ведомость согласована', lastMessage.message);
-//       } else if (lastMessage.type === 'approval_rejected') {
-//         showBrowserNotification('❌ Ведомость отклонена', lastMessage.message);
-//       } else if (lastMessage.type === 'defect_sheet_ready') {
-//         showBrowserNotification('📄 Ведомость обработана', lastMessage.message);
+//       if (lastWebSocketMessage.type === 'approval_request') {
+//         showBrowserNotification('📬 Новая ведомость на согласование', lastWebSocketMessage.message);
+//       } else if (lastWebSocketMessage.type === 'approval_approved') {
+//         showBrowserNotification('✅ Ведомость согласована', lastWebSocketMessage.message);
+//       } else if (lastWebSocketMessage.type === 'approval_rejected') {
+//         showBrowserNotification('❌ Ведомость отклонена', lastWebSocketMessage.message);
+//       } else if (lastWebSocketMessage.type === 'defect_sheet_ready') {
+//         showBrowserNotification('📄 Ведомость обработана', lastWebSocketMessage.message);
+//       } else if (lastWebSocketMessage.type === 'submitted_for_approval') {
+//         showBrowserNotification('📤 Отправлено на согласование', lastWebSocketMessage.message);
 //       }
 //     }
-//   }, [lastMessage]);
+//   }, [lastWebSocketMessage]);
 
 //   const showBrowserNotification = (title, body) => {
 //     if ('Notification' in window && Notification.permission === 'granted') {
@@ -107,10 +96,10 @@
           
 //           {/* Статус WebSocket */}
 //           <Badge 
-//             color={connectionStatus === 'connected' ? 'success' : 'error'} 
+//             color={wsConnected ? 'success' : 'error'} 
 //             variant="dot" 
 //             sx={{ mr: 2 }}
-//             title={connectionStatus === 'connected' ? 'Соединение установлено' : 'Нет соединения'}
+//             title={wsConnected ? 'Соединение установлено' : 'Нет соединения'}
 //           />
           
 //           {/* Информация о пользователе */}
@@ -169,13 +158,15 @@
 //       <Box sx={{ flexGrow: 1, p: 3, bgcolor: '#f5f5f5' }}>
 //         <Outlet />
 //       </Box>
+      
+//       {/* Компонент для всплывающих уведомлений */}
+//       <NotificationSnackbar />
 //     </Box>
 //   );
 // };
 
 // export default Layout;
 
-// frontend/src/components/Layout.jsx
 // frontend/src/components/Layout.jsx
 import React, { useEffect } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
@@ -196,11 +187,18 @@ import {
   Logout as LogoutIcon,
 } from '@mui/icons-material';
 import { useAuth } from '../context/AuthContext';
+import { useNotifications } from '../context/NotificationContext'; // Добавляем импорт
 import ApprovalNotifications from './ApprovalNotifications';
 import NotificationSnackbar from './NotificationSnackbar';
 
 const Layout = () => {
-  const { user, logout, lastWebSocketMessage, wsConnected } = useAuth(); // <-- Добавили wsConnected
+  const { user, logout, lastWebSocketMessage, wsConnected } = useAuth();
+  const { 
+    pendingApprovalsCount, 
+    mySheetsNotificationsCount,
+    resetPendingApprovalsCount,
+    resetMySheetsNotificationsCount,
+  } = useNotifications(); // Используем контекст уведомлений
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -247,6 +245,14 @@ const Layout = () => {
   };
 
   const handleTabChange = (event, newValue) => {
+    // Сбрасываем счетчики при переходе на соответствующие вкладки
+    if (newValue === 0) {
+      resetMySheetsNotificationsCount();
+    }
+    if (newValue === 2) {
+      resetPendingApprovalsCount();
+    }
+    
     switch (newValue) {
       case 0:
         navigate('/my-sheets');
@@ -311,19 +317,50 @@ const Layout = () => {
           onChange={handleTabChange}
           sx={{ px: 3 }}
         >
+          {/* Вкладка "Мои ведомости" с счетчиком */}
           <Tab 
-            icon={<AssignmentIcon />} 
+            icon={
+              <Badge 
+                badgeContent={mySheetsNotificationsCount} 
+                color="error"
+                sx={{
+                  '& .MuiBadge-badge': {
+                    top: -8,
+                    right: -8,
+                  }
+                }}
+              >
+                <AssignmentIcon />
+              </Badge>
+            } 
             label="Мои ведомости" 
             iconPosition="start"
           />
+          
+          {/* Вкладка "Новая ведомость" без счетчика */}
           <Tab 
             icon={<DescriptionIcon />} 
             label="Новая ведомость" 
             iconPosition="start"
           />
+          
+          {/* Вкладка "Согласование" с счетчиком (только для approver/admin) */}
           {(user?.role === 'approver' || user?.role === 'admin') && (
             <Tab 
-              icon={<CheckCircleIcon />} 
+              icon={
+                <Badge 
+                  badgeContent={pendingApprovalsCount} 
+                  color="error"
+                  sx={{
+                    '& .MuiBadge-badge': {
+                      top: -8,
+                      right: -8,
+                    }
+                  }}
+                >
+                  <CheckCircleIcon />
+                </Badge>
+              } 
               label="Согласование" 
               iconPosition="start"
             />
