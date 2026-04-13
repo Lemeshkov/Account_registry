@@ -455,13 +455,27 @@ def update_defect_sheet_item_calculation(
     formula_used: str
 ):
     """Обновить результат расчета для строки"""
+    print(f"🔧 CRUD: Updating item {item_id}")
+    print(f"   calculated_meters: {calculated_meters}")
+    print(f"   formula_used: {formula_used}")
+    
     item = db.query(models.DefectSheetItem).filter(models.DefectSheetItem.id == item_id).first()
+    
     if item:
+        print(f"   Found item: current calculated_meters={item.calculated_meters}, is_calculated={item.is_calculated}")
+        
         item.calculated_meters = calculated_meters
         item.formula_used = formula_used
         item.is_calculated = True
         item.calculated_at = func.now()
-        db.flush()
+        
+        db.commit()
+        
+        print(f"   ✅ Updated: new calculated_meters={item.calculated_meters}, is_calculated={item.is_calculated}")
+        return item
+    else:
+        print(f"   ❌ Item {item_id} NOT FOUND!")
+        return None
 
 def mark_items_for_calculation(db: Session, item_ids: List[int], selected: bool = True):
     """Отметить строки для пересчета"""

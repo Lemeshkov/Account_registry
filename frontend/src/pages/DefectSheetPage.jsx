@@ -212,19 +212,16 @@ const DefectSheetPage = () => {
 
   // ========== ПРОВЕРКА ПРАВ НА РЕДАКТИРОВАНИЕ ==========
   const canEdit = () => {
-    console.log("🔍 canEdit check:", {
-      sheetStatus,
-      userRole: user?.role,
-      isDraft: sheetStatus === "draft",
-      isPendingWithApprover: sheetStatus === "pending" && user?.role === "approver",
-      isAdmin: user?.role === "admin",
-    });
-
     if (sheetStatus === "draft") return true;
     if (sheetStatus === "pending" && user?.role === "approver") return true;
     if (user?.role === "admin") return true;
     return false;
   };
+
+  // ========== КОЛИЧЕСТВО НЕСОХРАНЕННЫХ РАСЧЕТОВ ==========
+  const unsavedCalculationsCount = items.filter(item => 
+    item.calculated_meters && !item.is_calculated
+  ).length;
 
   // ========== ЗАГРУЗКА ДАННЫХ СУЩЕСТВУЮЩЕЙ ВЕДОМОСТИ ==========
   const loadExistingSheet = async (existingSheetId) => {
@@ -253,51 +250,59 @@ const DefectSheetPage = () => {
   };
 
   // ========== ЗАГРУЗКА ДАННЫХ ==========
-  const loadSheetData = async (id) => {
-    const targetId = id;
-    if (!targetId) {
-      console.log("❌ No sheet ID provided");
-      return;
-    }
+const loadSheetData = async (id) => {
+  const targetId = id || sheetId;
+  if (!targetId) {
+    console.log("❌ No sheet ID provided");
+    return;
+  }
 
-    try {
-      setLoading(true);
-      console.log(`📥 Loading data for sheet: ${targetId}`);
+  try {
+    setLoading(true);
+    console.log(`📥 Loading data for sheet: ${targetId}`);
 
-      const data = await api.getDefectItems(targetId);
-      console.log("📦 Received data:", data);
+    const data = await api.getDefectItems(targetId);
+    console.log("📦 Received data:", JSON.stringify(data, null, 2)); // ← ИЗМЕНЕНО: полный вывод
 
-      if (data && data.items && Array.isArray(data.items)) {
-        console.log(`✅ Setting ${data.items.length} items`);
-        const itemsWithNumericIds = data.items.map((item) => ({
-          ...item,
-          id: Number(item.id),
-        }));
-        console.log("📦 Items with numeric IDs:", itemsWithNumericIds);
-        setItems(itemsWithNumericIds);
-        setSelectedItems([]);
-      } else if (Array.isArray(data)) {
-        const itemsWithNumericIds = data.map((item) => ({
-          ...item,
-          id: Number(item.id),
-        }));
-        console.log(`✅ Setting ${itemsWithNumericIds.length} items from array`);
-        setItems(itemsWithNumericIds);
-        setSelectedItems([]);
+    if (data && data.items && Array.isArray(data.items)) {
+      console.log(`✅ Setting ${data.items.length} items`);
+      
+      // 🔍 ДОБАВЬТЕ ЭТОТ ЛОГ - проверяем конкретную строку
+      const targetItem = data.items.find(i => i.id === 26315);
+      if (targetItem) {
+        console.log(`🔍 Item 26315 from API: calculated_meters=${targetItem.calculated_meters}, is_calculated=${targetItem.is_calculated}`);
       } else {
-        console.warn("⚠️ Unexpected data structure:", data);
-        setItems([]);
-        showNotification("Получены данные в неожиданном формате", "warning");
+        console.log("🔍 Item 26315 NOT found in API response!");
       }
-    } catch (error) {
-      console.error("❌ Error loading sheet data:", error);
-      showNotification(`Ошибка загрузки данных: ${error.message}`, "error");
+      
+      const itemsWithNumericIds = data.items.map((item) => ({
+        ...item,
+        id: Number(item.id),
+      }));
+      setItems(itemsWithNumericIds);
+      setSelectedItems([]);
+    } else if (Array.isArray(data)) {
+      const itemsWithNumericIds = data.map((item) => ({
+        ...item,
+        id: Number(item.id),
+      }));
+      console.log(`✅ Setting ${itemsWithNumericIds.length} items from array`);
+      setItems(itemsWithNumericIds);
+      setSelectedItems([]);
+    } else {
+      console.warn("⚠️ Unexpected data structure:", data);
       setItems([]);
-    } finally {
-      setLoading(false);
-      setProcessing(false);
+      showNotification("Получены данные в неожиданном формате", "warning");
     }
-  };
+  } catch (error) {
+    console.error("❌ Error loading sheet data:", error);
+    showNotification(`Ошибка загрузки данных: ${error.message}`, "error");
+    setItems([]);
+  } finally {
+    setLoading(false);
+    setProcessing(false);
+  }
+};
 
   // ========== ЗАГРУЗКА ПРИ МОНТИРОВАНИИ ==========
   useEffect(() => {
@@ -454,6 +459,7 @@ const DefectSheetPage = () => {
       showNotification("У вас нет прав на редактирование этой ведомости", "warning");
       return;
     }
+    
     try {
       if (result.isNewRow) {
         if (sheetStatus !== "draft" && sheetStatus !== "pending") {
@@ -494,6 +500,8 @@ const DefectSheetPage = () => {
 
         setTimeout(() => loadSheetData(sheetId), 500);
       } else {
+        // ✅ ТОЛЬКО обновляем локальное состояние, НЕ сохраняем в БД
+        // Сохранение произойдет при нажатии кнопки "Сохранить"
         setItems((prevItems) =>
           prevItems.map((item) =>
             item.id === result.id
@@ -501,7 +509,7 @@ const DefectSheetPage = () => {
                   ...item,
                   calculated_meters: result.meters,
                   profile_type: result.profileType,
-                  is_calculated: true,
+                  is_calculated: false, // ← Важно: false, чтобы кнопка "Сохранить" видела изменение
                   formula_used: result.formula,
                   weight_tons: result.weightTons || item.weight_tons,
                   requested_quantity: result.weightTons || item.requested_quantity,
@@ -509,11 +517,15 @@ const DefectSheetPage = () => {
               : item,
           ),
         );
-        showNotification(`Строка пересчитана: ${result.meters.toFixed(2)} м`, "success");
+        
+        showNotification(
+          `Строка пересчитана: ${result.meters.toFixed(2)} м. Нажмите "Сохранить" для записи в БД.`, 
+          "info"
+        );
       }
     } catch (error) {
-      console.error("❌ Error saving item:", error);
-      showNotification(`Ошибка при сохранении: ${error.message}`, "error");
+      console.error("❌ Error:", error);
+      showNotification(`Ошибка: ${error.message}`, "error");
     } finally {
       setProcessing(false);
     }
@@ -573,21 +585,54 @@ const DefectSheetPage = () => {
     }
   };
 
-  const handleSave = async () => {
-    if (!canEdit()) {
-      showNotification("У вас нет прав на сохранение изменений", "warning");
-      return;
-    }
-    try {
-      console.log("💾 Saving sheet:", sheetId);
+ 
+ // ========== СОХРАНЕНИЕ ВСЕХ ПЕРЕСЧИТАННЫХ ЗНАЧЕНИЙ ==========
+const handleSave = async () => {
+  if (!canEdit()) {
+    showNotification("У вас нет прав на сохранение изменений", "warning");
+    return;
+  }
+  
+  try {
+    setProcessing(true);
+    console.log("💾 Saving sheet:", sheetId);
+    
+    // Находим все строки, которые были пересчитаны, но не сохранены в БД
+    const itemsToUpdate = items.filter(item => 
+      item.calculated_meters && !item.is_calculated
+    );
+    
+    console.log(`📊 Found ${itemsToUpdate.length} items to update`);
+    
+    if (itemsToUpdate.length > 0) {
+      // Сохраняем все items одной операцией
+      const response = await api.saveDefectSheetWithItems(sheetId, itemsToUpdate);
+      console.log("📥 Save response:", response);
+      
+      // ✅ ОБНОВЛЯЕМ ЛОКАЛЬНОЕ СОСТОЯНИЕ - меняем is_calculated на true
+      setItems(prevItems => 
+        prevItems.map(item => {
+          const updated = itemsToUpdate.find(u => u.id === item.id);
+          if (updated) {
+            return { ...item, is_calculated: true };
+          }
+          return item;
+        })
+      );
+      
+      showNotification(`Сохранено ${itemsToUpdate.length} пересчитанных строк`, "success");
+    } else {
       await api.saveDefectSheet(sheetId);
       showNotification("Ведомость сохранена", "success");
-      loadSheetData(sheetId);
-    } catch (error) {
-      console.error("❌ Save error:", error);
-      showNotification("Ошибка при сохранении", "error");
     }
-  };
+    
+  } catch (error) {
+    console.error("❌ Save error:", error);
+    showNotification(`Ошибка при сохранении: ${error.message}`, "error");
+  } finally {
+    setProcessing(false);
+  }
+};
 
   const handleExport = async () => {
     try {
@@ -662,25 +707,43 @@ const DefectSheetPage = () => {
     }
   };
 
+ 
   // ========== ОТПРАВКА НА СОГЛАСОВАНИЕ ==========
-  const handleSubmitForApproval = async () => {
-    try {
-      setProcessing(true);
-      const comment = window.prompt("Введите комментарий (необязательно):");
-      await api.post("/api/defect/submit-for-approval", {
-        sheet_id: sheetId,
-        comment: comment || undefined,
-      });
-      showNotification("Ведомость отправлена на согласование", "success");
-      setSheetStatus("pending");
-      loadSheetData(sheetId);
-    } catch (error) {
-      console.error("Error submitting for approval:", error);
-      showNotification(`Ошибка: ${error.message}`, "error");
-    } finally {
-      setProcessing(false);
+const handleSubmitForApproval = async () => {
+  // Проверяем, есть ли несохраненные расчеты
+  if (unsavedCalculationsCount > 0) {
+    const confirmSave = window.confirm(
+      `Есть ${unsavedCalculationsCount} несохраненных расчетов. Сохранить перед отправкой?`
+    );
+    if (confirmSave) {
+      await handleSave();
+      await new Promise(resolve => setTimeout(resolve, 500));
+    } else {
+      showNotification("Пожалуйста, сохраните расчеты перед отправкой", "warning");
+      return;
     }
-  };
+  }
+  
+  try {
+    setProcessing(true);
+    const comment = window.prompt("Введите комментарий (необязательно):");
+    await api.post("/api/defect/submit-for-approval", {
+      sheet_id: sheetId,
+      comment: comment || undefined,
+    });
+    showNotification("Ведомость отправлена на согласование", "success");
+    setSheetStatus("pending");
+    
+    // ❌ УБИРАЕМ ЭТУ СТРОКУ - она перезаписывает данные!
+    // await loadSheetData(sheetId);
+    
+  } catch (error) {
+    console.error("Error submitting for approval:", error);
+    showNotification(`Ошибка: ${error.message}`, "error");
+  } finally {
+    setProcessing(false);
+  }
+};
 
   // ========== СОГЛАСОВАНИЕ ВЕДОМОСТИ ==========
   const handleApproveSheet = async () => {
@@ -840,29 +903,39 @@ const DefectSheetPage = () => {
     {
       field: "calculated_meters",
       headerName: "Пересчитано (метров)",
-      width: 180,
+      width: 200,
       type: "number",
-      renderCell: (params) => (
-        <Box sx={{ display: "flex", alignItems: "center", gap: 1, width: "100%" }}>
-          {params.value ? (
-            <Chip label={Number(params.value).toFixed(2)} color="success" size="small" variant="outlined" />
-          ) : (
-            <Typography variant="body2" color="textSecondary">-</Typography>
-          )}
-          <Tooltip title="Открыть калькулятор">
-            <IconButton
-              size="small"
-              color="primary"
-              onClick={() => {
-                const item = items.find((i) => i.id === params.id);
-                setSimpleCalculatorOpen({ open: true, item: item });
-              }}
-            >
-              <CalculatorIcon fontSize="small" />
-            </IconButton>
-          </Tooltip>
-        </Box>
-      ),
+      renderCell: (params) => {
+        const item = params.row;
+        const hasUnsavedCalculation = item.calculated_meters && !item.is_calculated;
+        
+        return (
+          <Box sx={{ display: "flex", alignItems: "center", gap: 1, width: "100%" }}>
+            {params.value ? (
+              <Chip 
+                label={Number(params.value).toFixed(2)} 
+                color={hasUnsavedCalculation ? "warning" : "success"} 
+                size="small" 
+                variant={hasUnsavedCalculation ? "outlined" : "filled"}
+              />
+            ) : (
+              <Typography variant="body2" color="textSecondary">-</Typography>
+            )}
+            <Tooltip title="Открыть калькулятор">
+              <IconButton
+                size="small"
+                color="primary"
+                onClick={() => {
+                  const item = items.find((i) => i.id === params.id);
+                  setSimpleCalculatorOpen({ open: true, item: item });
+                }}
+              >
+                <CalculatorIcon fontSize="small" />
+              </IconButton>
+            </Tooltip>
+          </Box>
+        );
+      },
     },
     {
       field: "profile_type",
@@ -876,10 +949,30 @@ const DefectSheetPage = () => {
     {
       field: "is_calculated",
       headerName: "Статус",
-      width: 100,
-      renderCell: (params) => (
-        <Chip label={params.value ? "✓ Пересчитано" : "Ожидает"} color={params.value ? "success" : "default"} size="small" />
-      ),
+      width: 160,
+      renderCell: (params) => {
+        const item = params.row;
+        const hasUnsavedCalculation = item.calculated_meters && !item.is_calculated;
+        
+        if (hasUnsavedCalculation) {
+          return (
+            <Chip 
+              label="⚠️ Требует сохранения" 
+              color="warning" 
+              size="small" 
+              variant="outlined"
+            />
+          );
+        }
+        
+        return (
+          <Chip 
+            label={item.is_calculated ? "✓ Пересчитано" : "Ожидает"} 
+            color={item.is_calculated ? "success" : "default"} 
+            size="small" 
+          />
+        );
+      },
     },
     {
       field: "actions",
@@ -1018,8 +1111,9 @@ const DefectSheetPage = () => {
       sheetStatus,
       userRole: user?.role,
       canEditValue: canEdit(),
+      unsavedCalculationsCount,
     });
-  }, [batchId, sheetId, items, loading, processing, selectedItems, sheetStatus, user]);
+  }, [batchId, sheetId, items, loading, processing, selectedItems, sheetStatus, user, unsavedCalculationsCount]);
 
   // ========== РЕНДЕР ==========
   return (
@@ -1041,6 +1135,16 @@ const DefectSheetPage = () => {
               <Chip label={processing ? "Обработка..." : "Готово"} color={processing ? "warning" : "success"} />
               <Chip label={`Записей: ${items.length}`} color="info" variant="outlined" />
               <Chip label={`Выбрано: ${selectedItems.length}`} color={selectedItems.length > 0 ? "primary" : "default"} variant="outlined" />
+              
+              {/* Индикатор несохраненных расчетов */}
+              {unsavedCalculationsCount > 0 && (
+                <Chip 
+                  label={`⚠️ ${unsavedCalculationsCount} несохраненных расчетов`} 
+                  color="warning" 
+                  size="medium" 
+                  variant="filled"
+                />
+              )}
 
               {sheetStatus && sheetStatus !== "draft" && (
                 <Chip
@@ -1074,7 +1178,6 @@ const DefectSheetPage = () => {
                 </IconButton>
               </Tooltip>
 
-              {/* НОВАЯ КНОПКА: Добавить строку */}
               <Button
                 variant="contained"
                 color="success"
@@ -1125,14 +1228,15 @@ const DefectSheetPage = () => {
                 Пересчитать ({selectedItems.length})
               </Button>
 
+              {/* Кнопка Сохранить с индикатором несохраненных расчетов */}
               <Button
-                variant="outlined"
+                variant="contained"
                 color="primary"
                 startIcon={<SaveIcon />}
                 onClick={handleSave}
                 disabled={processing || items.length === 0 || !canEdit()}
               >
-                Сохранить
+                Сохранить {unsavedCalculationsCount > 0 && `(${unsavedCalculationsCount})`}
               </Button>
 
               {sheetId && items.length > 0 && sheetStatus === "draft" && (
