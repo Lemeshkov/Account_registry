@@ -1,5 +1,4 @@
-
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect ,useRef} from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import {
   Box,
@@ -207,8 +206,8 @@ const DefectSheetPage = () => {
   const [rejectComment, setRejectComment] = useState("");
   const [sheetStatus, setSheetStatus] = useState("draft");
   const [addRowDialogOpen, setAddRowDialogOpen] = useState(false);
-  
   const { lastMessage, connectionStatus, subscribeToBatch } = useWebSocket();
+  const fileInputRef = useRef(null);
 
   // ========== ПРОВЕРКА ПРАВ НА РЕДАКТИРОВАНИЕ ==========
   const canEdit = () => {
@@ -219,8 +218,8 @@ const DefectSheetPage = () => {
   };
 
   // ========== КОЛИЧЕСТВО НЕСОХРАНЕННЫХ РАСЧЕТОВ ==========
-  const unsavedCalculationsCount = items.filter(item => 
-    item.calculated_meters && !item.is_calculated
+  const unsavedCalculationsCount = items.filter(
+    (item) => item.calculated_meters && !item.is_calculated,
   ).length;
 
   // ========== ЗАГРУЗКА ДАННЫХ СУЩЕСТВУЮЩЕЙ ВЕДОМОСТИ ==========
@@ -250,59 +249,63 @@ const DefectSheetPage = () => {
   };
 
   // ========== ЗАГРУЗКА ДАННЫХ ==========
-const loadSheetData = async (id) => {
-  const targetId = id || sheetId;
-  if (!targetId) {
-    console.log("❌ No sheet ID provided");
-    return;
-  }
-
-  try {
-    setLoading(true);
-    console.log(`📥 Loading data for sheet: ${targetId}`);
-
-    const data = await api.getDefectItems(targetId);
-    console.log("📦 Received data:", JSON.stringify(data, null, 2)); // ← ИЗМЕНЕНО: полный вывод
-
-    if (data && data.items && Array.isArray(data.items)) {
-      console.log(`✅ Setting ${data.items.length} items`);
-      
-      // 🔍 ДОБАВЬТЕ ЭТОТ ЛОГ - проверяем конкретную строку
-      const targetItem = data.items.find(i => i.id === 26315);
-      if (targetItem) {
-        console.log(`🔍 Item 26315 from API: calculated_meters=${targetItem.calculated_meters}, is_calculated=${targetItem.is_calculated}`);
-      } else {
-        console.log("🔍 Item 26315 NOT found in API response!");
-      }
-      
-      const itemsWithNumericIds = data.items.map((item) => ({
-        ...item,
-        id: Number(item.id),
-      }));
-      setItems(itemsWithNumericIds);
-      setSelectedItems([]);
-    } else if (Array.isArray(data)) {
-      const itemsWithNumericIds = data.map((item) => ({
-        ...item,
-        id: Number(item.id),
-      }));
-      console.log(`✅ Setting ${itemsWithNumericIds.length} items from array`);
-      setItems(itemsWithNumericIds);
-      setSelectedItems([]);
-    } else {
-      console.warn("⚠️ Unexpected data structure:", data);
-      setItems([]);
-      showNotification("Получены данные в неожиданном формате", "warning");
+  const loadSheetData = async (id) => {
+    const targetId = id || sheetId;
+    if (!targetId) {
+      console.log("❌ No sheet ID provided");
+      return;
     }
-  } catch (error) {
-    console.error("❌ Error loading sheet data:", error);
-    showNotification(`Ошибка загрузки данных: ${error.message}`, "error");
-    setItems([]);
-  } finally {
-    setLoading(false);
-    setProcessing(false);
-  }
-};
+
+    try {
+      setLoading(true);
+      console.log(`📥 Loading data for sheet: ${targetId}`);
+
+      const data = await api.getDefectItems(targetId);
+      console.log("📦 Received data:", JSON.stringify(data, null, 2)); // ← ИЗМЕНЕНО: полный вывод
+
+      if (data && data.items && Array.isArray(data.items)) {
+        console.log(`✅ Setting ${data.items.length} items`);
+
+        // 🔍 ДОБАВЬТЕ ЭТОТ ЛОГ - проверяем конкретную строку
+        const targetItem = data.items.find((i) => i.id === 26315);
+        if (targetItem) {
+          console.log(
+            `🔍 Item 26315 from API: calculated_meters=${targetItem.calculated_meters}, is_calculated=${targetItem.is_calculated}`,
+          );
+        } else {
+          console.log("🔍 Item 26315 NOT found in API response!");
+        }
+
+        const itemsWithNumericIds = data.items.map((item) => ({
+          ...item,
+          id: Number(item.id),
+        }));
+        setItems(itemsWithNumericIds);
+        setSelectedItems([]);
+      } else if (Array.isArray(data)) {
+        const itemsWithNumericIds = data.map((item) => ({
+          ...item,
+          id: Number(item.id),
+        }));
+        console.log(
+          `✅ Setting ${itemsWithNumericIds.length} items from array`,
+        );
+        setItems(itemsWithNumericIds);
+        setSelectedItems([]);
+      } else {
+        console.warn("⚠️ Unexpected data structure:", data);
+        setItems([]);
+        showNotification("Получены данные в неожиданном формате", "warning");
+      }
+    } catch (error) {
+      console.error("❌ Error loading sheet data:", error);
+      showNotification(`Ошибка загрузки данных: ${error.message}`, "error");
+      setItems([]);
+    } finally {
+      setLoading(false);
+      setProcessing(false);
+    }
+  };
 
   // ========== ЗАГРУЗКА ПРИ МОНТИРОВАНИИ ==========
   useEffect(() => {
@@ -332,7 +335,10 @@ const loadSheetData = async (id) => {
           if (data.sheet_id) {
             setSheetId(data.sheet_id);
           }
-          showNotification(`Файл обработан: ${data.total_items || 0} строк`, "success");
+          showNotification(
+            `Файл обработан: ${data.total_items || 0} строк`,
+            "success",
+          );
           break;
 
         case "defect_calculation_complete":
@@ -341,7 +347,10 @@ const loadSheetData = async (id) => {
           if (data.sheet_id) {
             loadSheetData(data.sheet_id);
           }
-          showNotification(`Пересчитано ${data.calculated_items || 0} строк`, "success");
+          showNotification(
+            `Пересчитано ${data.calculated_items || 0} строк`,
+            "success",
+          );
           break;
 
         case "defect_calculation_progress":
@@ -402,8 +411,12 @@ const loadSheetData = async (id) => {
         position: formData.position ? parseInt(formData.position) : null,
         address: formData.address || "",
         material_name: formData.material_name || "",
-        requested_quantity: formData.requested_quantity ? parseFloat(formData.requested_quantity) : null,
-        weight_tons: formData.weight_tons ? parseFloat(formData.weight_tons) : null,
+        requested_quantity: formData.requested_quantity
+          ? parseFloat(formData.requested_quantity)
+          : null,
+        weight_tons: formData.weight_tons
+          ? parseFloat(formData.weight_tons)
+          : null,
         is_calculated: false,
       };
 
@@ -424,7 +437,11 @@ const loadSheetData = async (id) => {
     }
   };
 
-  const handleCalculate = async (profileType, profileParams, applyToAll = true) => {
+  const handleCalculate = async (
+    profileType,
+    profileParams,
+    applyToAll = true,
+  ) => {
     if (!sheetId || selectedItems.length === 0) {
       showNotification("Выберите строки для пересчета", "warning");
       return;
@@ -453,17 +470,61 @@ const loadSheetData = async (id) => {
     }
   };
 
+  // ========== ДОБАВЛЕНИЕ ФАЙЛА (MERGE) ==========
+const handleMergeFile = async (event) => {
+  const file = event.target.files[0];
+  if (!file) return;
+
+  if (!file.name.endsWith(".xlsx") && !file.name.endsWith(".xls")) {
+    showNotification("Поддерживаются только Excel файлы (.xlsx, .xls)", "warning");
+    return;
+  }
+
+  const formData = new FormData();
+  formData.append("file", file);
+
+  try {
+    setProcessing(true);
+    showNotification("Загрузка файла...", "info");
+    
+    const response = await api.post(`/api/defect/${sheetId}/merge`, formData);
+    
+    console.log("Merge response:", response);
+    
+    showNotification(
+      `✅ Добавлено ${response.new_items} строк. Всего: ${response.total_items}`,
+      "success"
+    );
+    await loadSheetData(sheetId);
+  } catch (error) {
+    console.error("Merge error:", error);
+    showNotification(`❌ Ошибка: ${error.message}`, "error");
+  } finally {
+    setProcessing(false);
+    // Очищаем input
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+  }
+};
+
   // ========== КАЛЬКУЛЯТОР ДЛЯ ОДНОЙ СТРОКИ ==========
   const handleSimpleCalculate = async (result) => {
     if (!canEdit()) {
-      showNotification("У вас нет прав на редактирование этой ведомости", "warning");
+      showNotification(
+        "У вас нет прав на редактирование этой ведомости",
+        "warning",
+      );
       return;
     }
-    
+
     try {
       if (result.isNewRow) {
         if (sheetStatus !== "draft" && sheetStatus !== "pending") {
-          showNotification("Нельзя добавлять строки в ведомость после согласования", "warning");
+          showNotification(
+            "Нельзя добавлять строки в ведомость после согласования",
+            "warning",
+          );
           return;
         }
 
@@ -496,7 +557,10 @@ const loadSheetData = async (id) => {
           },
         ]);
 
-        showNotification(`Новая строка создана и сохранена: ${result.meters.toFixed(2)} м`, "success");
+        showNotification(
+          `Новая строка создана и сохранена: ${result.meters.toFixed(2)} м`,
+          "success",
+        );
 
         setTimeout(() => loadSheetData(sheetId), 500);
       } else {
@@ -512,15 +576,16 @@ const loadSheetData = async (id) => {
                   is_calculated: false, // ← Важно: false, чтобы кнопка "Сохранить" видела изменение
                   formula_used: result.formula,
                   weight_tons: result.weightTons || item.weight_tons,
-                  requested_quantity: result.weightTons || item.requested_quantity,
+                  requested_quantity:
+                    result.weightTons || item.requested_quantity,
                 }
               : item,
           ),
         );
-        
+
         showNotification(
-          `Строка пересчитана: ${result.meters.toFixed(2)} м. Нажмите "Сохранить" для записи в БД.`, 
-          "info"
+          `Строка пересчитана: ${result.meters.toFixed(2)} м. Нажмите "Сохранить" для записи в БД.`,
+          "info",
         );
       }
     } catch (error) {
@@ -534,7 +599,10 @@ const loadSheetData = async (id) => {
   // ========== УДАЛЕНИЕ СТРОК ==========
   const handleDeleteClick = (id) => {
     if (!canEdit()) {
-      showNotification("У вас нет прав на удаление строк этой ведомости", "warning");
+      showNotification(
+        "У вас нет прав на удаление строк этой ведомости",
+        "warning",
+      );
       return;
     }
     setItemToDelete(id);
@@ -543,7 +611,10 @@ const loadSheetData = async (id) => {
 
   const handleDeleteSelected = () => {
     if (!canEdit()) {
-      showNotification("У вас нет прав на удаление строк этой ведомости", "warning");
+      showNotification(
+        "У вас нет прав на удаление строк этой ведомости",
+        "warning",
+      );
       return;
     }
     if (selectedItems.length === 0) {
@@ -562,12 +633,16 @@ const loadSheetData = async (id) => {
         if (selectedItems.length > 0) {
           await api.batchDeleteDefectItems(selectedItems);
         }
-        setItems((prevItems) => prevItems.filter((item) => !selectedItems.includes(item.id)));
+        setItems((prevItems) =>
+          prevItems.filter((item) => !selectedItems.includes(item.id)),
+        );
         setSelectedItems([]);
         showNotification(`Удалено ${selectedItems.length} строк`, "success");
       } else {
         await api.deleteDefectItem(itemToDelete);
-        setItems((prevItems) => prevItems.filter((item) => item.id !== itemToDelete));
+        setItems((prevItems) =>
+          prevItems.filter((item) => item.id !== itemToDelete),
+        );
         setSelectedItems((prev) => prev.filter((id) => id !== itemToDelete));
         showNotification("Строка удалена", "success");
       }
@@ -585,54 +660,58 @@ const loadSheetData = async (id) => {
     }
   };
 
- 
- // ========== СОХРАНЕНИЕ ВСЕХ ПЕРЕСЧИТАННЫХ ЗНАЧЕНИЙ ==========
-const handleSave = async () => {
-  if (!canEdit()) {
-    showNotification("У вас нет прав на сохранение изменений", "warning");
-    return;
-  }
-  
-  try {
-    setProcessing(true);
-    console.log("💾 Saving sheet:", sheetId);
-    
-    // Находим все строки, которые были пересчитаны, но не сохранены в БД
-    const itemsToUpdate = items.filter(item => 
-      item.calculated_meters && !item.is_calculated
-    );
-    
-    console.log(`📊 Found ${itemsToUpdate.length} items to update`);
-    
-    if (itemsToUpdate.length > 0) {
-      // Сохраняем все items одной операцией
-      const response = await api.saveDefectSheetWithItems(sheetId, itemsToUpdate);
-      console.log("📥 Save response:", response);
-      
-      // ✅ ОБНОВЛЯЕМ ЛОКАЛЬНОЕ СОСТОЯНИЕ - меняем is_calculated на true
-      setItems(prevItems => 
-        prevItems.map(item => {
-          const updated = itemsToUpdate.find(u => u.id === item.id);
-          if (updated) {
-            return { ...item, is_calculated: true };
-          }
-          return item;
-        })
-      );
-      
-      showNotification(`Сохранено ${itemsToUpdate.length} пересчитанных строк`, "success");
-    } else {
-      await api.saveDefectSheet(sheetId);
-      showNotification("Ведомость сохранена", "success");
+  // ========== СОХРАНЕНИЕ ВСЕХ ПЕРЕСЧИТАННЫХ ЗНАЧЕНИЙ ==========
+  const handleSave = async () => {
+    if (!canEdit()) {
+      showNotification("У вас нет прав на сохранение изменений", "warning");
+      return;
     }
-    
-  } catch (error) {
-    console.error("❌ Save error:", error);
-    showNotification(`Ошибка при сохранении: ${error.message}`, "error");
-  } finally {
-    setProcessing(false);
-  }
-};
+
+    try {
+      setProcessing(true);
+      console.log("💾 Saving sheet:", sheetId);
+
+      // Находим все строки, которые были пересчитаны, но не сохранены в БД
+      const itemsToUpdate = items.filter(
+        (item) => item.calculated_meters && !item.is_calculated,
+      );
+
+      console.log(`📊 Found ${itemsToUpdate.length} items to update`);
+
+      if (itemsToUpdate.length > 0) {
+        // Сохраняем все items одной операцией
+        const response = await api.saveDefectSheetWithItems(
+          sheetId,
+          itemsToUpdate,
+        );
+        console.log("📥 Save response:", response);
+
+        // ✅ ОБНОВЛЯЕМ ЛОКАЛЬНОЕ СОСТОЯНИЕ - меняем is_calculated на true
+        setItems((prevItems) =>
+          prevItems.map((item) => {
+            const updated = itemsToUpdate.find((u) => u.id === item.id);
+            if (updated) {
+              return { ...item, is_calculated: true };
+            }
+            return item;
+          }),
+        );
+
+        showNotification(
+          `Сохранено ${itemsToUpdate.length} пересчитанных строк`,
+          "success",
+        );
+      } else {
+        await api.saveDefectSheet(sheetId);
+        showNotification("Ведомость сохранена", "success");
+      }
+    } catch (error) {
+      console.error("❌ Save error:", error);
+      showNotification(`Ошибка при сохранении: ${error.message}`, "error");
+    } finally {
+      setProcessing(false);
+    }
+  };
 
   const handleExport = async () => {
     try {
@@ -707,43 +786,44 @@ const handleSave = async () => {
     }
   };
 
- 
   // ========== ОТПРАВКА НА СОГЛАСОВАНИЕ ==========
-const handleSubmitForApproval = async () => {
-  // Проверяем, есть ли несохраненные расчеты
-  if (unsavedCalculationsCount > 0) {
-    const confirmSave = window.confirm(
-      `Есть ${unsavedCalculationsCount} несохраненных расчетов. Сохранить перед отправкой?`
-    );
-    if (confirmSave) {
-      await handleSave();
-      await new Promise(resolve => setTimeout(resolve, 500));
-    } else {
-      showNotification("Пожалуйста, сохраните расчеты перед отправкой", "warning");
-      return;
+  const handleSubmitForApproval = async () => {
+    // Проверяем, есть ли несохраненные расчеты
+    if (unsavedCalculationsCount > 0) {
+      const confirmSave = window.confirm(
+        `Есть ${unsavedCalculationsCount} несохраненных расчетов. Сохранить перед отправкой?`,
+      );
+      if (confirmSave) {
+        await handleSave();
+        await new Promise((resolve) => setTimeout(resolve, 500));
+      } else {
+        showNotification(
+          "Пожалуйста, сохраните расчеты перед отправкой",
+          "warning",
+        );
+        return;
+      }
     }
-  }
-  
-  try {
-    setProcessing(true);
-    const comment = window.prompt("Введите комментарий (необязательно):");
-    await api.post("/api/defect/submit-for-approval", {
-      sheet_id: sheetId,
-      comment: comment || undefined,
-    });
-    showNotification("Ведомость отправлена на согласование", "success");
-    setSheetStatus("pending");
-    
-    // ❌ УБИРАЕМ ЭТУ СТРОКУ - она перезаписывает данные!
-    // await loadSheetData(sheetId);
-    
-  } catch (error) {
-    console.error("Error submitting for approval:", error);
-    showNotification(`Ошибка: ${error.message}`, "error");
-  } finally {
-    setProcessing(false);
-  }
-};
+
+    try {
+      setProcessing(true);
+      const comment = window.prompt("Введите комментарий (необязательно):");
+      await api.post("/api/defect/submit-for-approval", {
+        sheet_id: sheetId,
+        comment: comment || undefined,
+      });
+      showNotification("Ведомость отправлена на согласование", "success");
+      setSheetStatus("pending");
+
+      // ❌ УБИРАЕМ ЭТУ СТРОКУ - она перезаписывает данные!
+      // await loadSheetData(sheetId);
+    } catch (error) {
+      console.error("Error submitting for approval:", error);
+      showNotification(`Ошибка: ${error.message}`, "error");
+    } finally {
+      setProcessing(false);
+    }
+  };
 
   // ========== СОГЛАСОВАНИЕ ВЕДОМОСТИ ==========
   const handleApproveSheet = async () => {
@@ -801,12 +881,17 @@ const handleSubmitForApproval = async () => {
   // ========== ОБРАБОТЧИК РЕДАКТИРОВАНИЯ ИЗ МОДАЛЬНОГО ОКНА ==========
   const handleEditModalSave = async (id, field, newValue) => {
     if (!canEdit()) {
-      showNotification("У вас нет прав на редактирование этой ведомости", "warning");
+      showNotification(
+        "У вас нет прав на редактирование этой ведомости",
+        "warning",
+      );
       return;
     }
     try {
       setItems((prevItems) =>
-        prevItems.map((item) => (item.id === id ? { ...item, [field]: newValue } : item)),
+        prevItems.map((item) =>
+          item.id === id ? { ...item, [field]: newValue } : item,
+        ),
       );
       await api.updateDefectItemField(id, field, newValue);
       showNotification(`Поле "${field}" обновлено`, "success");
@@ -843,7 +928,10 @@ const handleSubmitForApproval = async () => {
 
     const handleOpenEditModal = () => {
       if (!canEdit()) {
-        showNotification("У вас нет прав на редактирование этой ведомости", "warning");
+        showNotification(
+          "У вас нет прав на редактирование этой ведомости",
+          "warning",
+        );
         return;
       }
       setEditCellData({
@@ -896,10 +984,32 @@ const handleSubmitForApproval = async () => {
   const columns = [
     { field: "id", headerName: "ID", width: 70, type: "number" },
     { field: "position", headerName: "№", width: 70, type: "number" },
-    { field: "address", headerName: "Адрес (Марка)", width: 200, renderCell: (params) => renderEditableCell(params) },
-    { field: "material_name", headerName: "Наименование материала", width: 300, renderCell: (params) => renderEditableCell(params) },
-    { field: "requested_quantity", headerName: "Затреб (тонн)", width: 120, type: "number", renderCell: (params) => renderEditableCell(params) },
-    { field: "weight_tons", headerName: "Вес (тонн)", width: 120, type: "number", renderCell: (params) => renderEditableCell(params) },
+    {
+      field: "address",
+      headerName: "Адрес (Марка)",
+      width: 200,
+      renderCell: (params) => renderEditableCell(params),
+    },
+    {
+      field: "material_name",
+      headerName: "Наименование материала",
+      width: 300,
+      renderCell: (params) => renderEditableCell(params),
+    },
+    {
+      field: "requested_quantity",
+      headerName: "Затреб (тонн)",
+      width: 120,
+      type: "number",
+      renderCell: (params) => renderEditableCell(params),
+    },
+    {
+      field: "weight_tons",
+      headerName: "Вес (тонн)",
+      width: 120,
+      type: "number",
+      renderCell: (params) => renderEditableCell(params),
+    },
     {
       field: "calculated_meters",
       headerName: "Пересчитано (метров)",
@@ -907,19 +1017,29 @@ const handleSubmitForApproval = async () => {
       type: "number",
       renderCell: (params) => {
         const item = params.row;
-        const hasUnsavedCalculation = item.calculated_meters && !item.is_calculated;
-        
+        const hasUnsavedCalculation =
+          item.calculated_meters && !item.is_calculated;
+
         return (
-          <Box sx={{ display: "flex", alignItems: "center", gap: 1, width: "100%" }}>
+          <Box
+            sx={{
+              display: "flex",
+              alignItems: "center",
+              gap: 1,
+              width: "100%",
+            }}
+          >
             {params.value ? (
-              <Chip 
-                label={Number(params.value).toFixed(2)} 
-                color={hasUnsavedCalculation ? "warning" : "success"} 
-                size="small" 
+              <Chip
+                label={Number(params.value).toFixed(2)}
+                color={hasUnsavedCalculation ? "warning" : "success"}
+                size="small"
                 variant={hasUnsavedCalculation ? "outlined" : "filled"}
               />
             ) : (
-              <Typography variant="body2" color="textSecondary">-</Typography>
+              <Typography variant="body2" color="textSecondary">
+                -
+              </Typography>
             )}
             <Tooltip title="Открыть калькулятор">
               <IconButton
@@ -943,7 +1063,13 @@ const handleSubmitForApproval = async () => {
       width: 100,
       renderCell: (params) => {
         const profile = PROFILE_TYPES[params.value];
-        return <Chip label={profile?.icon || params.value || "Не выбран"} size="small" variant="outlined" />;
+        return (
+          <Chip
+            label={profile?.icon || params.value || "Не выбран"}
+            size="small"
+            variant="outlined"
+          />
+        );
       },
     },
     {
@@ -952,24 +1078,25 @@ const handleSubmitForApproval = async () => {
       width: 160,
       renderCell: (params) => {
         const item = params.row;
-        const hasUnsavedCalculation = item.calculated_meters && !item.is_calculated;
-        
+        const hasUnsavedCalculation =
+          item.calculated_meters && !item.is_calculated;
+
         if (hasUnsavedCalculation) {
           return (
-            <Chip 
-              label="⚠️ Требует сохранения" 
-              color="warning" 
-              size="small" 
+            <Chip
+              label="⚠️ Требует сохранения"
+              color="warning"
+              size="small"
               variant="outlined"
             />
           );
         }
-        
+
         return (
-          <Chip 
-            label={item.is_calculated ? "✓ Пересчитано" : "Ожидает"} 
-            color={item.is_calculated ? "success" : "default"} 
-            size="small" 
+          <Chip
+            label={item.is_calculated ? "✓ Пересчитано" : "Ожидает"}
+            color={item.is_calculated ? "success" : "default"}
+            size="small"
           />
         );
       },
@@ -983,7 +1110,11 @@ const handleSubmitForApproval = async () => {
       renderCell: (params) => (
         <Box sx={{ display: "flex", gap: 0.5 }}>
           <Tooltip title="Удалить строку">
-            <IconButton size="small" color="error" onClick={() => handleDeleteClick(params.id)}>
+            <IconButton
+              size="small"
+              color="error"
+              onClick={() => handleDeleteClick(params.id)}
+            >
               <DeleteIcon fontSize="small" />
             </IconButton>
           </Tooltip>
@@ -1001,8 +1132,16 @@ const handleSubmitForApproval = async () => {
 
     try {
       const headers = [
-        "№ п/п", "Марка (Адрес)", "Наименование материала", "Затреб (тонн)", "Вес (тонн)",
-        "Тип профиля", "Параметры", "Пересчитано (метров)", "Формула", "Статус",
+        "№ п/п",
+        "Марка (Адрес)",
+        "Наименование материала",
+        "Затреб (тонн)",
+        "Вес (тонн)",
+        "Тип профиля",
+        "Параметры",
+        "Пересчитано (метров)",
+        "Формула",
+        "Статус",
       ];
 
       const dataRows = items.map((item) => {
@@ -1011,11 +1150,15 @@ const handleSubmitForApproval = async () => {
           item.position || "",
           item.address || "",
           item.material_name || "",
-          item.requested_quantity ? Number(item.requested_quantity).toFixed(3) : "",
+          item.requested_quantity
+            ? Number(item.requested_quantity).toFixed(3)
+            : "",
           item.weight_tons ? Number(item.weight_tons).toFixed(3) : "",
           item.profile_type || "",
           item.profile_params ? JSON.stringify(item.profile_params) : "",
-          item.calculated_meters ? Number(item.calculated_meters).toFixed(2) : "",
+          item.calculated_meters
+            ? Number(item.calculated_meters).toFixed(2)
+            : "",
           item.formula_used || "",
           status,
         ];
@@ -1032,9 +1175,15 @@ const handleSubmitForApproval = async () => {
 
       const fullContent = [...title, headers, ...dataRows];
       const xlsContent = fullContent
-        .map((row) => row.map((cell) => `"${String(cell || "").replace(/"/g, '""')}"`).join("\t"))
+        .map((row) =>
+          row
+            .map((cell) => `"${String(cell || "").replace(/"/g, '""')}"`)
+            .join("\t"),
+        )
         .join("\n");
-      const blob = new Blob(["\uFEFF" + xlsContent], { type: "application/vnd.ms-excel;charset=utf-8" });
+      const blob = new Blob(["\uFEFF" + xlsContent], {
+        type: "application/vnd.ms-excel;charset=utf-8",
+      });
       const fileName = `defect_sheet_simple_${batchId ? batchId.slice(0, 8) : "temp"}_${new Date().toISOString().slice(0, 10)}.xls`;
       const link = document.createElement("a");
       const url = URL.createObjectURL(blob);
@@ -1060,8 +1209,16 @@ const handleSubmitForApproval = async () => {
 
     try {
       const headers = [
-        "№ п/п", "Марка (Адрес)", "Наименование материала", "Затреб (тонн)", "Вес (тонн)",
-        "Тип профиля", "Параметры", "Пересчитано (метров)", "Формула", "Статус",
+        "№ п/п",
+        "Марка (Адрес)",
+        "Наименование материала",
+        "Затреб (тонн)",
+        "Вес (тонн)",
+        "Тип профиля",
+        "Параметры",
+        "Пересчитано (метров)",
+        "Формула",
+        "Статус",
       ].join(";");
 
       const dataRows = items.map((item) => {
@@ -1070,18 +1227,24 @@ const handleSubmitForApproval = async () => {
           `"${(item.position || "").replace(/"/g, '""')}"`,
           `"${(item.address || "").replace(/"/g, '""')}"`,
           `"${(item.material_name || "").replace(/"/g, '""')}"`,
-          item.requested_quantity ? Number(item.requested_quantity).toFixed(3) : "",
+          item.requested_quantity
+            ? Number(item.requested_quantity).toFixed(3)
+            : "",
           item.weight_tons ? Number(item.weight_tons).toFixed(3) : "",
           `"${(item.profile_type || "").replace(/"/g, '""')}"`,
           `"${(item.profile_params ? JSON.stringify(item.profile_params) : "").replace(/"/g, '""')}"`,
-          item.calculated_meters ? Number(item.calculated_meters).toFixed(2) : "",
+          item.calculated_meters
+            ? Number(item.calculated_meters).toFixed(2)
+            : "",
           `"${(item.formula_used || "").replace(/"/g, '""')}"`,
           `"${status.replace(/"/g, '""')}"`,
         ].join(";");
       });
 
       const csvContent = [headers, ...dataRows].join("\n");
-      const blob = new Blob(["\uFEFF" + csvContent], { type: "text/csv;charset=utf-8;" });
+      const blob = new Blob(["\uFEFF" + csvContent], {
+        type: "text/csv;charset=utf-8;",
+      });
       const fileName = `defect_sheet_${batchId ? batchId.slice(0, 8) : "temp"}_${new Date().toISOString().slice(0, 10)}.csv`;
       const link = document.createElement("a");
       const url = URL.createObjectURL(blob);
@@ -1113,7 +1276,17 @@ const handleSubmitForApproval = async () => {
       canEditValue: canEdit(),
       unsavedCalculationsCount,
     });
-  }, [batchId, sheetId, items, loading, processing, selectedItems, sheetStatus, user, unsavedCalculationsCount]);
+  }, [
+    batchId,
+    sheetId,
+    items,
+    loading,
+    processing,
+    selectedItems,
+    sheetStatus,
+    user,
+    unsavedCalculationsCount,
+  ]);
 
   // ========== РЕНДЕР ==========
   return (
@@ -1121,7 +1294,12 @@ const handleSubmitForApproval = async () => {
       <Typography variant="h4" gutterBottom>
         Дефектная ведомость
         {connectionStatus === "connected" && (
-          <Chip label="WebSocket подключен" color="success" size="small" sx={{ ml: 2 }} />
+          <Chip
+            label="WebSocket подключен"
+            color="success"
+            size="small"
+            sx={{ ml: 2 }}
+          />
         )}
       </Typography>
 
@@ -1130,18 +1308,36 @@ const handleSubmitForApproval = async () => {
       ) : (
         <Box>
           <Paper sx={{ p: 2, mb: 2 }}>
-            <Box sx={{ display: "flex", gap: 2, alignItems: "center", flexWrap: "wrap" }}>
+            <Box
+              sx={{
+                display: "flex",
+                gap: 2,
+                alignItems: "center",
+                flexWrap: "wrap",
+              }}
+            >
               <Typography variant="subtitle1">Batch ID: {batchId}</Typography>
-              <Chip label={processing ? "Обработка..." : "Готово"} color={processing ? "warning" : "success"} />
-              <Chip label={`Записей: ${items.length}`} color="info" variant="outlined" />
-              <Chip label={`Выбрано: ${selectedItems.length}`} color={selectedItems.length > 0 ? "primary" : "default"} variant="outlined" />
-              
+              <Chip
+                label={processing ? "Обработка..." : "Готово"}
+                color={processing ? "warning" : "success"}
+              />
+              <Chip
+                label={`Записей: ${items.length}`}
+                color="info"
+                variant="outlined"
+              />
+              <Chip
+                label={`Выбрано: ${selectedItems.length}`}
+                color={selectedItems.length > 0 ? "primary" : "default"}
+                variant="outlined"
+              />
+
               {/* Индикатор несохраненных расчетов */}
               {unsavedCalculationsCount > 0 && (
-                <Chip 
-                  label={`⚠️ ${unsavedCalculationsCount} несохраненных расчетов`} 
-                  color="warning" 
-                  size="medium" 
+                <Chip
+                  label={`⚠️ ${unsavedCalculationsCount} несохраненных расчетов`}
+                  color="warning"
+                  size="medium"
                   variant="filled"
                 />
               )}
@@ -1152,19 +1348,19 @@ const handleSubmitForApproval = async () => {
                     sheetStatus === "pending"
                       ? "⏳ Ожидает согласования"
                       : sheetStatus === "approved"
-                      ? "✅ Согласовано"
-                      : sheetStatus === "rejected"
-                      ? "❌ Отклонено"
-                      : sheetStatus
+                        ? "✅ Согласовано"
+                        : sheetStatus === "rejected"
+                          ? "❌ Отклонено"
+                          : sheetStatus
                   }
                   color={
                     sheetStatus === "pending"
                       ? "warning"
                       : sheetStatus === "approved"
-                      ? "success"
-                      : sheetStatus === "rejected"
-                      ? "error"
-                      : "default"
+                        ? "success"
+                        : sheetStatus === "rejected"
+                          ? "error"
+                          : "default"
                   }
                   variant="filled"
                 />
@@ -1189,10 +1385,22 @@ const handleSubmitForApproval = async () => {
                 Добавить строку
               </Button>
 
-              <Button variant="outlined" color="warning" size="small" onClick={handleSelectAll} disabled={items.length === 0}>
+              <Button
+                variant="outlined"
+                color="warning"
+                size="small"
+                onClick={handleSelectAll}
+                disabled={items.length === 0}
+              >
                 Выбрать все
               </Button>
-              <Button variant="outlined" color="warning" size="small" onClick={handleClearSelection} disabled={selectedItems.length === 0}>
+              <Button
+                variant="outlined"
+                color="warning"
+                size="small"
+                onClick={handleClearSelection}
+                disabled={selectedItems.length === 0}
+              >
                 Очистить
               </Button>
 
@@ -1207,7 +1415,14 @@ const handleSubmitForApproval = async () => {
                 Удалить выбранные ({selectedItems.length})
               </Button>
 
-              <Button variant="contained" color="secondary" startIcon={<CalculatorIcon />} onClick={() => setSimpleCalculatorOpen({ open: true, item: null })}>
+              <Button
+                variant="contained"
+                color="secondary"
+                startIcon={<CalculatorIcon />}
+                onClick={() =>
+                  setSimpleCalculatorOpen({ open: true, item: null })
+                }
+              >
                 Калькулятор
               </Button>
 
@@ -1236,21 +1451,41 @@ const handleSubmitForApproval = async () => {
                 onClick={handleSave}
                 disabled={processing || items.length === 0 || !canEdit()}
               >
-                Сохранить {unsavedCalculationsCount > 0 && `(${unsavedCalculationsCount})`}
+                Сохранить{" "}
+                {unsavedCalculationsCount > 0 &&
+                  `(${unsavedCalculationsCount})`}
               </Button>
 
               {sheetId && items.length > 0 && sheetStatus === "draft" && (
-                <Button variant="contained" color="warning" startIcon={<SendIcon />} onClick={handleSubmitForApproval} disabled={processing}>
+                <Button
+                  variant="contained"
+                  color="warning"
+                  startIcon={<SendIcon />}
+                  onClick={handleSubmitForApproval}
+                  disabled={processing}
+                >
                   Отправить на согласование
                 </Button>
               )}
 
               {sheetStatus === "pending" && user?.role === "approver" && (
                 <>
-                  <Button variant="contained" color="success" startIcon={<CheckIcon />} onClick={handleApproveSheet} disabled={processing}>
+                  <Button
+                    variant="contained"
+                    color="success"
+                    startIcon={<CheckIcon />}
+                    onClick={handleApproveSheet}
+                    disabled={processing}
+                  >
                     Согласовать
                   </Button>
-                  <Button variant="contained" color="error" startIcon={<CloseIcon />} onClick={() => setRejectDialogOpen(true)} disabled={processing}>
+                  <Button
+                    variant="contained"
+                    color="error"
+                    startIcon={<CloseIcon />}
+                    onClick={() => setRejectDialogOpen(true)}
+                    disabled={processing}
+                  >
                     Отклонить
                   </Button>
                 </>
@@ -1267,7 +1502,9 @@ const handleSubmitForApproval = async () => {
                   if (useFormatted) {
                     handleExportFormattedExcel();
                   } else {
-                    const useOldFormat = window.confirm("OK - XLS (старый Excel 97-2003)\nОтмена - CSV");
+                    const useOldFormat = window.confirm(
+                      "OK - XLS (старый Excel 97-2003)\nОтмена - CSV",
+                    );
                     if (useOldFormat) {
                       handleExportToExcel();
                     } else {
@@ -1278,6 +1515,24 @@ const handleSubmitForApproval = async () => {
                 disabled={items.length === 0 || processing}
               >
                 Экспорт
+              </Button>
+
+              <Button
+                variant="outlined"
+                color="info"
+                size="small"
+                component="label"
+                startIcon={<AddIcon />}
+                disabled={!canEdit() || processing}
+              >
+                Добавить файл
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  hidden
+                  accept=".xlsx,.xls"
+                  onChange={handleMergeFile}
+                />
               </Button>
             </Box>
           </Paper>
@@ -1305,7 +1560,10 @@ const handleSubmitForApproval = async () => {
       )}
 
       {/* Диалог подтверждения удаления */}
-      <Dialog open={deleteDialogOpen} onClose={() => setDeleteDialogOpen(false)}>
+      <Dialog
+        open={deleteDialogOpen}
+        onClose={() => setDeleteDialogOpen(false)}
+      >
         <DialogTitle>Подтверждение удаления</DialogTitle>
         <DialogContent>
           <Typography>
@@ -1323,7 +1581,12 @@ const handleSubmitForApproval = async () => {
       </Dialog>
 
       {/* Диалог отклонения ведомости */}
-      <Dialog open={rejectDialogOpen} onClose={() => setRejectDialogOpen(false)} maxWidth="sm" fullWidth>
+      <Dialog
+        open={rejectDialogOpen}
+        onClose={() => setRejectDialogOpen(false)}
+        maxWidth="sm"
+        fullWidth
+      >
         <DialogTitle>Отклонение ведомости</DialogTitle>
         <DialogContent>
           <TextField
@@ -1337,7 +1600,11 @@ const handleSubmitForApproval = async () => {
             onChange={(e) => setRejectComment(e.target.value)}
             required
             error={rejectDialogOpen && !rejectComment.trim()}
-            helperText={rejectDialogOpen && !rejectComment.trim() ? "Укажите причину отклонения" : ""}
+            helperText={
+              rejectDialogOpen && !rejectComment.trim()
+                ? "Укажите причину отклонения"
+                : ""
+            }
           />
         </DialogContent>
         <DialogActions>
@@ -1385,7 +1652,11 @@ const handleSubmitForApproval = async () => {
         cellData={editCellData}
       />
 
-      <Snackbar open={notification.open} autoHideDuration={6000} onClose={() => setNotification({ ...notification, open: false })}>
+      <Snackbar
+        open={notification.open}
+        autoHideDuration={6000}
+        onClose={() => setNotification({ ...notification, open: false })}
+      >
         <Alert severity={notification.severity}>{notification.message}</Alert>
       </Snackbar>
     </Box>

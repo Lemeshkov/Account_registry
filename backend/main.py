@@ -1536,38 +1536,134 @@ def save_defect_sheet(
         "message": "Дефектная ведомость сохранена"
     }
 
-# @app.post("/api/defect/save")
-# def save_defect_sheet(
-#     sheet_id: int,
-#     db: Session = Depends(get_db)
-# ):
-#     sheet = get_defect_sheet(db, sheet_id)
-#     if not sheet:
-#         raise HTTPException(404, "Дефектная ведомость не найдена")
+# добавление файла
+
+@app.post("/api/defect/{sheet_id}/merge")
+async def merge_defect_sheet(
+    sheet_id: int,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Добавить строки из другого файла к существующей ведомости"""
     
-#     items = get_defect_sheet_items(db, sheet_id)
-#     uncounted = [item for item in items if not item.is_calculated and item.weight_tons]
+    print(f"🔍 === MERGE START ===")
+    print(f"🔍 sheet_id: {sheet_id}")
+    print(f"🔍 file: {file.filename}")
+    print(f"🔍 file.content_type: {file.content_type}")
+    print(f"🔍 current_user.id: {current_user.id}")
+    print(f"🔍 current_user.role: {current_user.role}")
     
-#     if uncounted and sheet.status != "partially_calculated":
-#         return {
-#             "warning": f"Есть непересчитанные строки ({len(uncounted)}). Сохранить как есть?",
-#             "can_save": True
-#         }
+    # Проверяем существование ведомости
+    sheet = get_defect_sheet(db, sheet_id)
+    if not sheet:
+        print(f"❌ Sheet {sheet_id} not found")
+        raise HTTPException(404, "Дефектная ведомость не найдена")
     
-#     sheet.status = "exported"
-#     db.commit()
+    print(f"✅ Sheet found: id={sheet.id}, created_by={sheet.created_by}, status={sheet.status}")
     
-#     asyncio.run(websocket_manager.broadcast_to_batch(sheet.batch_id, {
-#         "type": "defect_sheet_saved",
-#         "sheet_id": sheet.id,
-#         "batch_id": sheet.batch_id
-#     }))
+    # Проверяем права
+    if sheet.created_by != current_user.id and current_user.role not in ["admin"]:
+        print(f"❌ Permission denied: sheet.created_by={sheet.created_by}, current_user={current_user.id}")
+        raise HTTPException(403, "Нет прав на редактирование этой ведомости")
     
-#     return {
-#         "status": "saved",
-#         "sheet_id": sheet_id,
-#         "message": "Дефектная ведомость сохранена"
-#     }
+    # Проверяем расширение файла
+    ext = file.filename.split(".")[-1].lower()
+    print(f"🔍 File extension: {ext}")
+    
+    if ext not in ("xlsx", "xls"):
+        print(f"❌ Invalid extension: {ext}")
+        raise HTTPException(400, "Поддерживаются только Excel файлы (.xlsx, .xls)")
+    
+    # Создаем директорию если её нет
+    DEFECT_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    
+    # Сохраняем файл
+    temp_file_path = DEFECT_UPLOAD_DIR / f"merge_{sheet_id}_{uuid.uuid4()}_{file.filename}"
+    print(f"🔍 Saving to: {temp_file_path}")
+    
+    try:
+        content = await file.read()
+        print(f"🔍 File size: {len(content)} bytes")
+        
+        with open(temp_file_path, "wb") as f:
+            f.write(content)
+        print(f"✅ File saved")
+        
+        # Парсим файл
+        print(f"🔍 Parsing file...")
+        new_items, metadata = parse_defect_sheet(temp_file_path)
+        print(f"✅ Parsed {len(new_items)} items, metadata: {metadata}")
+        
+        if not new_items:
+            print(f"❌ No items found in file")
+            raise HTTPException(400, "В файле не найдено данных")
+        
+        # Получаем текущие items
+        existing_items = get_defect_sheet_items(db, sheet_id)
+        max_position = max([item.position for item in existing_items], default=0)
+        print(f"📊 Existing items: {len(existing_items)}, max_position: {max_position}")
+        
+        # Добавляем новые строки
+        added_count = 0
+        for idx, item_data in enumerate(new_items):
+            if isinstance(item_data, tuple):
+                item_dict, _ = item_data
+            else:
+                item_dict = item_data
+            
+            db_item = DefectSheetItem(
+                sheet_id=sheet_id,
+                position=max_position + idx + 1,
+                excel_position=item_dict.get('excel_position'),
+                address=item_dict.get('address'),
+                material_name=item_dict.get('material_name'),
+                requested_quantity=item_dict.get('requested_quantity'),
+                weight_tons=item_dict.get('weight_tons', item_dict.get('requested_quantity')),
+                profile_type=item_dict.get('profile_type'),
+                profile_params=item_dict.get('profile_params'),
+                is_calculated=False
+            )
+            db.add(db_item)
+            added_count += 1
+        
+        # Обновляем счетчик
+        sheet.total_items = len(existing_items) + added_count
+        db.commit()
+        print(f"✅ Added {added_count} items, total: {sheet.total_items}")
+        
+        # Удаляем временный файл
+        os.remove(temp_file_path)
+        print(f"✅ Temp file removed")
+        
+        # Уведомляем через WebSocket
+        await websocket_manager.broadcast_to_batch(sheet.batch_id, {
+            "type": "defect_sheet_merged",
+            "sheet_id": sheet.id,
+            "batch_id": sheet.batch_id,
+            "new_items_count": added_count,
+            "total_items": sheet.total_items
+        })
+        
+        return {
+            "status": "merged",
+            "sheet_id": sheet_id,
+            "new_items": added_count,
+            "total_items": sheet.total_items,
+            "message": f"Добавлено {added_count} строк из файла {file.filename}"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        print(f"❌ Merge error: {type(e).__name__}: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        if os.path.exists(temp_file_path):
+            os.remove(temp_file_path)
+        raise HTTPException(500, f"Ошибка при слиянии: {str(e)}")
+
 
 @app.post("/api/defect/submit-for-approval")
 async def submit_defect_sheet_for_approval(
