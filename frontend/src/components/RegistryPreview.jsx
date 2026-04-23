@@ -1,1295 +1,105 @@
 
-// import React, { useEffect, useState, useCallback } from "react";
-// import InvoiceMatchModal from "./InvoiceMatchModal";
-// import "../styles.css";
-
-// const PAYERS = ["Сибуглеснаб", "ООО Ромашка", "ИП Иванов"];
-// const PAYMENT_SYSTEMS = ["Предоплата", "Постоплата"];
-
-// const RegistryPreview = ({ data, onReload }) => {
-//   const [rows, setRows] = useState([]);
-//   const [originalRows, setOriginalRows] = useState([]);
-//   const [matchInvoice, setMatchInvoice] = useState(null);
-//   const [availableInvoices, setAvailableInvoices] = useState([]);
-//   const [isLoading, setIsLoading] = useState(false);
-//   const [exportLoading, setExportLoading] = useState(false); // Новое состояние для экспорта
-//   const [debugInfo, setDebugInfo] = useState("");
-//   const [batchId, setBatchId] = useState("");
-//   const [selectedRowIndex, setSelectedRowIndex] = useState(null);
-//   const [lastUpdatedRowId, setLastUpdatedRowId] = useState(null);
-
-//   // Инициализация строк - сохраняем оригинальный порядок
-//   useEffect(() => {
-//     console.log("📊 Data received in RegistryPreview:", data);
-    
-//     let registryData = [];
-//     let extractedBatchId = "";
-    
-//     if (Array.isArray(data)) {
-//       registryData = data;
-//     } else if (data && typeof data === 'object') {
-//       if (data.registry_preview && Array.isArray(data.registry_preview)) {
-//         registryData = data.registry_preview;
-//       } else if (Array.isArray(data)) {
-//         registryData = data;
-//       } else {
-//         for (const key in data) {
-//           if (Array.isArray(data[key]) && data[key].length > 0) {
-//             registryData = data[key];
-//             break;
-//           }
-//         }
-//       }
-//     }
-    
-//     if (registryData.length > 0) {
-//       console.log(`✅ Using ${registryData.length} registry items`);
-//       setDebugInfo(`Получено ${registryData.length} строк реестра`);
-      
-//       const rowsWithOrder = registryData.map((r, index) => ({
-//         ...r,
-//         payer: r.payer || "Сибуглеснаб",
-//         payment_system: r.payment_system || "Предоплата",
-//         included_in_plan: true,
-//         displayOrder: r.position || index,
-//         hasInvoice: !!r.invoice_id,
-//         originalId: r.id
-//       }));
-      
-//       rowsWithOrder.sort((a, b) => (a.displayOrder || 0) - (b.displayOrder || 0));
-
-//       setOriginalRows(rowsWithOrder);
-//       setRows(rowsWithOrder);
-      
-//       if (rowsWithOrder.length > 0) {
-//         const possibleBatchId = 
-//           rowsWithOrder[0].batch_id || 
-//           rowsWithOrder[0].imported_batch ||
-//           (data && data.batch_id);
-        
-//         if (possibleBatchId) {
-//           setBatchId(possibleBatchId);
-//           console.log(`✅ Extracted batch_id: ${possibleBatchId}`);
-//         }
-//       }
-      
-//       const rowsWithInvoice = rowsWithOrder.filter(r => r.invoice_id).length;
-//       console.log(`📊 Строк с привязанными счетами: ${rowsWithInvoice}/${rowsWithOrder.length}`);
-//     } else {
-//       console.log(" No registry data found");
-//       setDebugInfo("Нет данных реестра");
-//       setRows([]);
-//       setOriginalRows([]);
-//     }
-    
-//   }, [data]);
-
-//   // Функция для экспорта в Excel
-//   const exportToExcel = () => {
-//     if (!rows.length) {
-//       alert("Нет данных для экспорта");
-//       return;
-//     }
-
-//     // Спросим пользователя о формате
-//     const useOldFormat = confirm(
-//       "Выберите формат экспорта:\n\n" +
-//       "OK - XLS (старый Excel 97-2003)\n" +
-//       "Отмена - CSV (откроется в современном Excel)\n\n" +
-//       "XLS рекомендуется для очень старых версий Excel."
-//     );
-
-//     setExportLoading(true);
-//     setDebugInfo("Подготовка экспорта...");
-
-//     setTimeout(() => {
-//       try {
-//         if (useOldFormat) {
-//           // Экспорт в XLS (старый формат)
-//           exportToXLS();
-//         } else {
-//           // Экспорт в CSV (откроется в Excel)
-//           exportToCSV();
-//         }
-        
-//         setDebugInfo(`✅ Экспорт завершен: ${rows.length} строк`);
-//       } catch (error) {
-//         console.error("Ошибка при экспорте:", error);
-//         setDebugInfo(`❌ Ошибка: ${error.message}`);
-//         alert(`Ошибка при экспорте: ${error.message}`);
-//       } finally {
-//         setExportLoading(false);
-//       }
-//     }, 100);
-//   };
-
-//   // Экспорт в XLS (старый формат Excel)
-//   const exportToXLS = () => {
-//     // Создаем заголовки
-//     const headers = [
-//       "Поставщик",
-//       "Реквизиты счета",
-//       "Контрагент",
-//       "Плательщик",
-//       "Сумма",
-//       "в т.ч НДС",
-//       "Учтено",
-//       "Система расчетов",
-//       "Комментарий",
-//       "Техника",
-//       "г.н"
-//     ];
-
-//     // Создаем данные
-//     const dataRows = rows.map((row) => {
-//       const invoiceDetails = row.invoice_details || {};
-      
-//       let invoiceText = "";
-//       if (invoiceDetails.invoice_full_text) {
-//         invoiceText = invoiceDetails.invoice_full_text;
-//       } else if (invoiceDetails.invoice_number && invoiceDetails.invoice_date) {
-//         invoiceText = `Счет на оплату № ${invoiceDetails.invoice_number} от ${invoiceDetails.invoice_date}`;
-//       }
-
-//       return [
-//         row.supplier || "",
-//         invoiceText,
-//         row.contractor || "",
-//         row.payer || "Сибуглеснаб",
-//         row.amount || 0,
-//         row.vat_amount || 0,
-//         row.included_in_plan ? "Да" : "Нет",
-//         row.payment_system || "Предоплата",
-//         row.comment || "",
-//         row.vehicle || "",
-//         row.license_plate || ""
-//       ];
-//     });
-
-//     // Создаем полное содержимое с заголовком
-//     const title = [
-//       ["Реестр платежей"],
-//       [`Экспортировано: ${new Date().toLocaleString('ru-RU')}`],
-//       [`Всего строк: ${rows.length}`],
-//       [`С привязанными счетами: ${rows.filter(r => r.invoice_id).length}`],
-//       [`Batch ID: ${batchId || 'не указан'}`],
-//       []
-//     ];
-
-//     const fullContent = [...title, headers, ...dataRows];
-
-//     // Конвертируем в CSV с разделителем табуляции (лучше для Excel)
-//     const csvContent = fullContent.map(row => 
-//       row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join('\t')
-//     ).join('\n');
-
-//     // Создаем файл с расширением .xls
-//     const blob = new Blob(['\uFEFF' + csvContent], { 
-//       type: 'text/plain;charset=utf-8'
-//     });
-    
-//     const fileName = `реестр_${batchId ? batchId.slice(0, 8) : "без_batch"}_${new Date().toISOString().slice(0, 10)}.xls`;
-//     const link = document.createElement("a");
-//     const url = URL.createObjectURL(blob);
-    
-//     link.href = url;
-//     link.download = fileName;
-//     document.body.appendChild(link);
-//     link.click();
-//     document.body.removeChild(link);
-//     URL.revokeObjectURL(url);
-//   };
-
-//   // Экспорт в CSV (откроется в современном Excel)
-//   const exportToCSV = () => {
-//     const headers = [
-//       "Поставщик",
-//       "Реквизиты счета",
-//       "Контрагент",
-//       "Плательщик",
-//       "Сумма",
-//       "в т.ч НДС",
-//       "Учтено",
-//       "Система расчетов",
-//       "Комментарий",
-//       "Техника",
-//       "г.н"
-//     ].join(";");
-
-//     const dataRows = rows.map((row) => {
-//       const invoiceDetails = row.invoice_details || {};
-      
-//       let invoiceText = "";
-//       if (invoiceDetails.invoice_full_text) {
-//         invoiceText = invoiceDetails.invoice_full_text;
-//       } else if (invoiceDetails.invoice_number && invoiceDetails.invoice_date) {
-//         invoiceText = `Счет на оплату № ${invoiceDetails.invoice_number} от ${invoiceDetails.invoice_date}`;
-//       }
-
-//       return [
-//         `"${(row.supplier || "").replace(/"/g, '""')}"`,
-//         `"${invoiceText.replace(/"/g, '""')}"`,
-//         `"${(row.contractor || "").replace(/"/g, '""')}"`,
-//         `"${(row.payer || "").replace(/"/g, '""')}"`,
-//         row.amount || 0,
-//         row.vat_amount || 0,
-//         row.included_in_plan ? "Да" : "Нет",
-//         `"${(row.payment_system || "").replace(/"/g, '""')}"`,
-//         `"${(row.comment || "").replace(/"/g, '""')}"`,
-//         `"${(row.vehicle || "").replace(/"/g, '""')}"`,
-//         `"${(row.license_plate || "").replace(/"/g, '""')}"`
-//       ].join(";");
-//     });
-
-//     const csvContent = [headers, ...dataRows].join("\n");
-//     const blob = new Blob(['\uFEFF' + csvContent], { 
-//       type: 'text/csv;charset=utf-8;'
-//     });
-    
-//     const fileName = `реестр_${batchId ? batchId.slice(0, 8) : "без_batch"}_${new Date().toISOString().slice(0, 10)}.csv`;
-//     const link = document.createElement("a");
-//     const url = URL.createObjectURL(blob);
-    
-//     link.href = url;
-//     link.download = fileName;
-//     document.body.appendChild(link);
-//     link.click();
-//     document.body.removeChild(link);
-//     URL.revokeObjectURL(url);
-//   };
-
-//   // Функция для загрузки счетов
-//   const loadInvoices = useCallback((batchId) => {
-//     if (!batchId) {
-//       console.log(" No batch_id provided for loading invoices");
-//       setDebugInfo("Ошибка: batch_id не найден для загрузки счетов");
-//       return;
-//     }
-    
-//     setIsLoading(true);
-//     setDebugInfo(`Загрузка счетов для batch: ${batchId}`);
-    
-//     fetch(`http://localhost:8000/registry/${batchId}/invoices-from-buffer`)
-//       .then(res => {
-//         if (!res.ok) throw new Error(`HTTP ${res.status}`);
-//         return res.json();
-//       })
-//       .then(result => {
-//         if (result && Array.isArray(result.invoices)) {
-//           setAvailableInvoices(result.invoices);
-//           setDebugInfo(`Найдено счетов: ${result.invoices.length}`);
-//         } else if (result && Array.isArray(result)) {
-//           setAvailableInvoices(result);
-//           setDebugInfo(`Найдено счетов: ${result.length}`);
-//         } else {
-//           setDebugInfo("Нет счетов в буфере");
-//           setAvailableInvoices([]);
-//         }
-//       })
-//       .catch(err => {
-//         console.error(" Ошибка загрузки счетов:", err);
-//         setDebugInfo(`Ошибка: ${err.message}`);
-//         setAvailableInvoices([]);
-//       })
-//       .finally(() => {
-//         setIsLoading(false);
-//       });
-//   }, []);
-
-//   // Загружаем доступные счета из буфера при наличии batchId
-//   useEffect(() => {
-//     if (batchId) loadInvoices(batchId);
-//   }, [batchId, loadInvoices]);
-
-//   const updateRow = (index, field, value) => {
-//     setRows((prev) =>
-//       prev.map((row, i) => (i === index ? { ...row, [field]: value } : row))
-//     );
-//   };
-
-//   const handleRowSelect = (index) => {
-//     setSelectedRowIndex(index);
-//     setLastUpdatedRowId(null);
-//   };
-
-//   const handleMatchClick = () => {
-//     if (selectedRowIndex === null) {
-//       alert("Пожалуйста, выберите строку реестра для сопоставления");
-//       return;
-//     }
-    
-//     const row = rows[selectedRowIndex];
-//     console.log(" Match click on selected row:", row);
-    
-//     setMatchInvoice({
-//       id: row.invoice_id || null,
-//       details: row.invoice_details || {},
-//       filename: row.invoice_details?.file || `Счет из буфера`,
-//       registryRow: row,
-//       registryRowIndex: selectedRowIndex,
-//       registryRowId: row.id,
-//       batchId: batchId || row.batch_id || rows[0]?.batch_id
-//     });
-//   };
-
-//   const handleManualApply = (invoiceId, registryId, applyType, lineNo) => {
-//     setIsLoading(true);
-//     setDebugInfo(`Применение счета ${invoiceId?.slice(0,8) || 'unknown'}...`);
-    
-//     let endpoint, requestBody;
-    
-//     if (applyType === "full" && lineNo !== undefined) {
-//       endpoint = "http://localhost:8000/invoice/apply-line";
-//       requestBody = {
-//         invoice_id: invoiceId,
-//         line_no: lineNo,
-//         registry_id: registryId,
-//       };
-//     } else {
-//       endpoint = "http://localhost:8000/invoice/manual-match";
-//       const currentBatchId = batchId || rows[0]?.batch_id;
-//       requestBody = {
-//         batch_id: currentBatchId,
-//         registry_id: registryId,
-//         invoice_id: invoiceId,
-//         apply_type: applyType
-//       };
-//     }
-    
-//     console.log(`📤 Sending to ${endpoint}:`, requestBody);
-    
-//     fetch(endpoint, {
-//       method: "POST",
-//       headers: { "Content-Type": "application/json" },
-//       body: JSON.stringify(requestBody),
-//     })
-//     .then(res => {
-//       if (!res.ok) {
-//         throw new Error(`HTTP ${res.status}`);
-//       }
-//       return res.json();
-//     })
-//     .then(result => {
-//       console.log("✅ Apply response:", result);
-//       if (result.status === "ok") {
-//         updateRowLocally(registryId, invoiceId, result);
-//         alert("✅ Счет успешно применен!");
-//         setLastUpdatedRowId(registryId);
-//         setMatchInvoice(null);
-        
-//         if (onReload) {
-//           setTimeout(() => {
-//             onReload();
-//           }, 1000);
-//         }
-//       } else {
-//         throw new Error(result.message || "Ошибка применения");
-//       }
-//     })
-//     .catch(err => {
-//       console.error(" Ошибка применения счета:", err);
-//       alert(` Ошибка: ${err.message}`);
-//     })
-//     .finally(() => {
-//       setIsLoading(false);
-//       setDebugInfo("Готово");
-//     });
-//   };
-
-//   const updateRowLocally = (registryId, invoiceId, result) => {
-//     console.log("🔄 Локальное обновление строки:", registryId);
-    
-//     setRows(prevRows => {
-//       return prevRows.map(row => {
-//         if (row.id === registryId) {
-//           const updatedRow = {
-//             ...row,
-//             invoice_id: invoiceId,
-//             hasInvoice: true
-//           };
-          
-//           if (result.invoice_details) {
-//             updatedRow.invoice_details = result.invoice_details;
-//           }
-          
-//           updatedRow.lastUpdated = Date.now();
-          
-//           return updatedRow;
-//         }
-//         return row;
-//       });
-//     });
-    
-//     setSelectedRowIndex(null);
-//   };
-
-//   const handleInvoiceApplied = () => {
-//     console.log("🔄 Информация о привязке обновлена локально");
-//     setSelectedRowIndex(null);
-    
-//     if (onReload) {
-//       setTimeout(() => onReload(), 500);
-//     }
-//   };
-
-//   useEffect(() => {
-//     if (rows.length > 0 && originalRows.length > 0) {
-//       const orderMap = new Map();
-//       originalRows.forEach((row, index) => {
-//         orderMap.set(row.id, index);
-//       });
-      
-//       const sortedRows = [...rows].sort((a, b) => {
-//         const orderA = orderMap.get(a.id) || a.displayOrder || 0;
-//         const orderB = orderMap.get(b.id) || b.displayOrder || 0;
-//         return orderA - orderB;
-//       });
-      
-//       const needsSorting = sortedRows.some((row, index) => row.id !== rows[index]?.id);
-//       if (needsSorting) {
-//         console.log("🔄 Восстановление порядка строк");
-//         setRows(sortedRows);
-//       }
-//     }
-//   }, [rows, originalRows]);
-
-//   if (!rows.length) {
-//     return (
-//       <div className="requests-table" style={{ textAlign: "center", padding: "40px" }}>
-//         <h3> Реестр не сформирован</h3>
-//         <p>Загрузите документ, чтобы увидеть предпросмотр</p>
-//       </div>
-//     );
-//   }
-
-//   const rowsWithInvoice = rows.filter(r => r.invoice_id).length;
-
-//   return (
-//     <div className="registry-container">
-//       <div className="registry-header">
-//         <div className="header-content">
-//           <div className="header-left">
-//             <h3> Предпросмотр реестра</h3>
-//             <p className="header-stats">
-//               Всего строк: <strong>{rows.length}</strong> | 
-//               С привязанными счетами: <strong style={{ color: rowsWithInvoice > 0 ? "#28a745" : "#dc3545" }}>
-//                 {rowsWithInvoice}
-//               </strong> | 
-//               Доступно счетов: <strong style={{ color: availableInvoices.length > 0 ? "#28a745" : "#dc3545" }}>
-//                 {availableInvoices.length}
-//               </strong>
-//               {batchId && ` | Batch: ${batchId.slice(0, 8)}...`}
-//               {selectedRowIndex !== null && ` | Выбрана строка: ${selectedRowIndex + 1}`}
-//               {lastUpdatedRowId && ` | Обновлена строка: ID ${lastUpdatedRowId}`}
-//             </p>
-//           </div>
-//           <div className="header-right">
-//             <div className="debug-info">
-//               <div>{debugInfo}</div>
-//             </div>
-            
-//             <button 
-//               onClick={handleMatchClick}
-//               className="header-btn match-btn"
-//               disabled={selectedRowIndex === null || !availableInvoices.length || isLoading}
-//               title={selectedRowIndex === null ? "Выберите строку реестра" : "Сопоставить счет с выбранной строкой"}
-//             >
-//               🎯 Сопоставить
-//             </button>
-            
-//             <button 
-//               onClick={exportToExcel}
-//               className="header-btn excel-btn"
-//               disabled={!rows.length || exportLoading || isLoading}
-//               title="Экспорт в Excel"
-//             >
-//               {exportLoading ? "⏳" : "📊 Excel"}
-//             </button>
-            
-//             <button 
-//               onClick={() => batchId && loadInvoices(batchId)}
-//               className="header-btn refresh-btn"
-//               title="Обновить список счетов"
-//               disabled={isLoading || exportLoading}
-//             >
-//               🔄 Обновить
-//             </button>
-            
-//             {(isLoading || exportLoading) && <div className="loading-spinner">🔄</div>}
-//           </div>
-//         </div>
-//       </div>
-
-//       <div className="registry-table-container">
-//         <div className="registry-table-wrapper">
-//           <table className="registry-table">
-//             <thead>
-//               <tr>
-//                 <th style={{ width: "50px" }}>Выбор</th>
-//                 <th style={{ width: "70px" }}>№</th>
-//                 <th style={{ minWidth: "180px" }}>Поставщик</th>
-//                 <th style={{ minWidth: "350px" }}>Реквизиты счета</th>
-//                 <th style={{ minWidth: "200px" }}>Контрагент</th>
-//                 <th style={{ width: "140px" }}>Плательщик</th>
-//                 <th style={{ width: "120px" }}>Сумма</th>
-//                 <th style={{ width: "100px" }}>в т.ч НДС</th>
-//                 <th style={{ width: "90px" }}>Учтено</th>
-//                 <th style={{ width: "150px" }}>Система расчетов</th>
-//                 <th style={{ minWidth: "200px" }}>Комментарий</th>
-//                 <th style={{ minWidth: "150px" }}>Техника</th>
-//                 <th style={{ width: "120px" }}>г.н</th>
-//               </tr>
-//             </thead>
-
-//             <tbody>
-//               {rows.map((r, i) => {
-//                 const d = r.invoice_details || {};
-                
-//                 let invoiceText = "";
-//                 let hasInvoiceText = false;
-                
-//                 if (d.invoice_full_text) {
-//                   invoiceText = d.invoice_full_text;
-//                   hasInvoiceText = true;
-//                 } else if (d.invoice_number && d.invoice_date) {
-//                   invoiceText = `Счет на оплату № ${d.invoice_number} от ${d.invoice_date}`;
-//                   hasInvoiceText = true;
-//                 } else if (d.invoice_number) {
-//                   invoiceText = `Счет № ${d.invoice_number}`;
-//                   hasInvoiceText = true;
-//                 } else if (d.invoice_date) {
-//                   invoiceText = `Счет от ${d.invoice_date}`;
-//                   hasInvoiceText = true;
-//                 }
-
-//                 const hasInvoice = !!r.invoice_id;
-//                 const isSelected = selectedRowIndex === i;
-//                 const isRecentlyUpdated = lastUpdatedRowId === r.id;
-                
-//                 return (
-//                   <tr 
-//                     key={`${r.id}-${r.lastUpdated || ''}`}
-//                     className={`
-//                       ${hasInvoice ? "has-invoice-row" : ""} 
-//                       ${isSelected ? "selected-row" : ""}
-//                       ${isRecentlyUpdated ? "recently-updated-row" : ""}
-//                     `}
-//                     onClick={() => handleRowSelect(i)}
-//                   >
-//                     <td>
-//                       <div className="selection-cell">
-//                         <input
-//                           type="radio"
-//                           name="selected-row"
-//                           checked={isSelected}
-//                           onChange={() => handleRowSelect(i)}
-//                           title="Выбрать эту строку для сопоставления"
-//                           onClick={(e) => e.stopPropagation()}
-//                         />
-//                       </div>
-//                     </td>
-
-//                     <td className="row-id">{r.id}</td>
-
-//                     <td>
-//                       <input
-//                         className="cell-input"
-//                         value={r.supplier || ""}
-//                         onChange={(e) => updateRow(i, "supplier", e.target.value)}
-//                         onClick={(e) => e.stopPropagation()}
-//                         placeholder="Введите поставщика"
-//                       />
-//                     </td>
-
-//                     <td className="invoice-details-cell">
-//                       {hasInvoiceText ? (
-//                         <div>
-//                           <div className="invoice-title">
-//                             {invoiceText}
-//                             {isRecentlyUpdated && <span className="update-badge">НОВОЕ</span>}
-//                           </div>
-//                         </div>
-//                       ) : (
-//                         <span className="no-invoice-text">
-//                           {isSelected ? "⬅ Выбрано для сопоставления" : "Счет не привязан"}
-//                         </span>
-//                       )}
-//                     </td>
-
-//                     <td>
-//                       <div className="contractor-cell">
-//                         {r.contractor ? (
-//                           <span className="contractor-name">{r.contractor}</span>
-//                         ) : (
-//                           <span className="empty-field">—</span>
-//                         )}
-//                       </div>
-//                     </td>
-
-//                     <td>
-//                       <select
-//                         className="payer-select"
-//                         value={r.payer}
-//                         onChange={(e) => updateRow(i, "payer", e.target.value)}
-//                         onClick={(e) => e.stopPropagation()}
-//                       >
-//                         {PAYERS.map((p) => (
-//                           <option key={p} value={p}>
-//                             {p}
-//                           </option>
-//                         ))}
-//                       </select>
-//                     </td>
-
-//                     <td className="amount-cell">
-//                       {r.amount ? (
-//                         <span className="amount-value">
-//                           {r.amount}
-//                         </span>
-//                       ) : (
-//                         <span className="empty-field">—</span>
-//                       )}
-//                     </td>
-
-//                     <td>{r.vat_amount || <span className="empty-field">—</span>}</td>
-
-//                     <td className="included-cell">
-//                       <span className="included-badge">Да</span>
-//                     </td>
-
-//                     <td>
-//                       <select
-//                         className="payment-system-select"
-//                         value={r.payment_system}
-//                         onChange={(e) => updateRow(i, "payment_system", e.target.value)}
-//                         onClick={(e) => e.stopPropagation()}
-//                       >
-//                         {PAYMENT_SYSTEMS.map((p) => (
-//                           <option key={p} value={p}>
-//                             {p}
-//                           </option>
-//                         ))}
-//                       </select>
-//                     </td>
-
-//                     <td>
-//                       <input
-//                         className="cell-input comment-input"
-//                         value={r.comment || ""}
-//                         onChange={(e) => updateRow(i, "comment", e.target.value)}
-//                         onClick={(e) => e.stopPropagation()}
-//                         placeholder="Комментарий"
-//                       />
-//                     </td>
-
-//                     <td>
-//                       <input
-//                         className="cell-input"
-//                         value={r.vehicle || ""}
-//                         onChange={(e) => updateRow(i, "vehicle", e.target.value)}
-//                         onClick={(e) => e.stopPropagation()}
-//                         placeholder="Модель"
-//                       />
-//                     </td>
-
-//                     <td>
-//                       <input
-//                         className="cell-input license-plate-input"
-//                         value={r.license_plate || ""}
-//                         onChange={(e) => updateRow(i, "license_plate", e.target.value)}
-//                         onClick={(e) => e.stopPropagation()}
-//                         placeholder="A000AA"
-//                       />
-//                     </td>
-//                   </tr>
-//                 );
-//               })}
-//             </tbody>
-//           </table>
-//         </div>
-//       </div>
-
-//       {matchInvoice && (
-//         <InvoiceMatchModal
-//           invoice={matchInvoice}
-//           registryRows={[rows[selectedRowIndex]]}
-//           selectedRegistryRowId={matchInvoice.registryRowId}
-//           availableInvoices={availableInvoices}
-//           onClose={() => {
-//             setMatchInvoice(null);
-//             setSelectedRowIndex(null);
-//           }}
-//           onApplied={handleInvoiceApplied}
-//           onManualApply={handleManualApply}
-//         />
-//       )}
-
-//       <style jsx>{`
-//         .registry-container {
-//           display: flex;
-//           flex-direction: column;
-//           height: 100vh;
-//           max-height: 100vh;
-//           overflow: hidden;
-//         }
-        
-//         .registry-header {
-//           flex-shrink: 0;
-//           padding: 12px 20px;
-//           border-bottom: 1px solid #e0e0e0;
-//           background: #f5f7fa;
-//           box-shadow: 0 2px 4px rgba(0,0,0,0.05);
-//         }
-        
-//         .header-content {
-//           display: flex;
-//           justify-content: space-between;
-//           align-items: center;
-//           gap: 20px;
-//         }
-        
-//         .header-left {
-//           flex: 1;
-//         }
-        
-//         .header-left h3 {
-//           margin: 0;
-//           font-size: 18px;
-//           color: #2c3e50;
-//         }
-        
-//         .header-right {
-//           display: flex;
-//           gap: 10px;
-//           align-items: center;
-//         }
-        
-//         .header-stats {
-//           color: #546e7a;
-//           font-size: 13px;
-//           margin: 6px 0 0 0;
-//         }
-        
-//         .debug-info {
-//           font-size: 12px;
-//           color: #78909c;
-//           text-align: right;
-//           margin-right: 10px;
-//           min-width: 150px;
-//         }
-        
-//         .header-btn {
-//           padding: 8px 16px;
-//           border: none;
-//           border-radius: 6px;
-//           font-size: 13px;
-//           font-weight: 500;
-//           cursor: pointer;
-//           transition: all 0.2s;
-//           display: flex;
-//           align-items: center;
-//           gap: 6px;
-//           white-space: nowrap;
-//         }
-        
-//         .header-btn:disabled {
-//           opacity: 0.5;
-//           cursor: not-allowed;
-//           transform: none !important;
-//         }
-        
-//         .match-btn {
-//           background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-//           color: white;
-//           box-shadow: 0 2px 4px rgba(102, 126, 234, 0.3);
-//         }
-        
-//         .match-btn:hover:not(:disabled) {
-//           background: linear-gradient(135deg, #5a6fd8 0%, #6b3f8f 100%);
-//           transform: translateY(-2px);
-//           box-shadow: 0 4px 8px rgba(102, 126, 234, 0.4);
-//         }
-        
-//         .excel-btn {
-//           background: linear-gradient(135deg, #4CAF50 0%, #2E7D32 100%);
-//           color: white;
-//           box-shadow: 0 2px 4px rgba(76, 175, 80, 0.3);
-//         }
-        
-//         .excel-btn:hover:not(:disabled) {
-//           background: linear-gradient(135deg, #43A047 0%, #1B5E20 100%);
-//           transform: translateY(-2px);
-//           box-shadow: 0 4px 8px rgba(76, 175, 80, 0.4);
-//         }
-        
-//         .refresh-btn {
-//           background: linear-gradient(135deg, #2196F3 0%, #0D47A1 100%);
-//           color: white;
-//           box-shadow: 0 2px 4px rgba(33, 150, 243, 0.3);
-//         }
-        
-//         .refresh-btn:hover:not(:disabled) {
-//           background: linear-gradient(135deg, #1E88E5 0%, #1565C0 100%);
-//           transform: translateY(-2px);
-//           box-shadow: 0 4px 8px rgba(33, 150, 243, 0.4);
-//         }
-        
-//         .registry-table-container {
-//           flex: 1;
-//           overflow: auto;
-//           position: relative;
-//           background: #fff;
-//         }
-        
-//         .registry-table-wrapper {
-//           overflow-x: auto;
-//           overflow-y: auto;
-//           height: 100%;
-//         }
-        
-//         .registry-table {
-//           width: 100%;
-//           min-width: 1400px;
-//           border-collapse: separate;
-//           border-spacing: 0;
-//         }
-        
-//         .registry-table th {
-//           background: #f8f9fa;
-//           position: sticky;
-//           top: 0;
-//           z-index: 10;
-//           border-bottom: 2px solid #e0e0e0;
-//           font-weight: 600;
-//           color: #37474f;
-//           padding: 12px 10px;
-//           text-align: left;
-//           font-size: 13px;
-//         }
-        
-//         .registry-table td {
-//           padding: 10px 10px;
-//           vertical-align: middle;
-//           white-space: normal;
-//           border-bottom: 1px solid #f0f0f0;
-//           font-size: 13px;
-//           transition: background-color 0.3s ease;
-//         }
-        
-//         .row-id {
-//           font-weight: 600;
-//           color: #37474f;
-//           font-family: monospace;
-//         }
-        
-//         .registry-table tbody tr {
-//           cursor: pointer;
-//         }
-        
-//         .registry-table tbody tr:hover {
-//           background-color: #f8fafc !important;
-//         }
-        
-//         .has-invoice-row {
-//           background-color: #f0f9f0 !important;
-//         }
-        
-//         .has-invoice-row:hover {
-//           background-color: #e8f5e9 !important;
-//         }
-        
-//         .selected-row {
-//           background-color: #e3f2fd !important;
-//           position: relative;
-//         }
-        
-//         .selected-row::after {
-//           content: '';
-//           position: absolute;
-//           left: 0;
-//           top: 0;
-//           bottom: 0;
-//           width: 4px;
-//           background: linear-gradient(180deg, #667eea 0%, #764ba2 100%);
-//         }
-        
-//         .recently-updated-row {
-//           animation: highlight-pulse 2s ease-in-out;
-//           background-color: #fff8e1 !important;
-//         }
-        
-//         @keyframes highlight-pulse {
-//           0% { background-color: #fff8e1; }
-//           50% { background-color: #fff3e0; }
-//           100% { background-color: #fff8e1; }
-//         }
-        
-//         .selection-cell {
-//           text-align: center;
-//         }
-        
-//         .selection-cell input[type="radio"] {
-//           cursor: pointer;
-//           transform: scale(1.2);
-//           accent-color: #667eea;
-//         }
-        
-//         .invoice-details-cell {
-//           line-height: 1.4;
-//         }
-        
-//         .invoice-title {
-//           font-weight: 500;
-//           color: #2c3e50;
-//           font-size: 14px;
-//           display: flex;
-//           align-items: center;
-//           gap: 8px;
-//         }
-        
-//         .update-badge {
-//           background: linear-gradient(135deg, #ff9800 0%, #f57c00 100%);
-//           color: white;
-//           padding: 2px 6px;
-//           border-radius: 4px;
-//           font-size: 10px;
-//           font-weight: 600;
-//           animation: pulse 1.5s infinite;
-//         }
-        
-//         @keyframes pulse {
-//           0% { opacity: 1; }
-//           50% { opacity: 0.7; }
-//           100% { opacity: 1; }
-//         }
-        
-//         .no-invoice-text {
-//           font-style: italic;
-//           color: #90a4ae;
-//           font-size: 13px;
-//         }
-        
-//         .contractor-name {
-//           font-weight: 500;
-//         }
-        
-//         .empty-field {
-//           color: #b0bec5;
-//           font-style: italic;
-//         }
-        
-//         .amount-value {
-//           font-weight: 600;
-//           color: #4caf50;
-//         }
-        
-//         .included-badge {
-//           display: inline-block;
-//           padding: 4px 10px;
-//           background: linear-gradient(135deg, #81c784 0%, #66bb6a 100%);
-//           color: white;
-//           border-radius: 12px;
-//           font-size: 12px;
-//           font-weight: 500;
-//           text-align: center;
-//           min-width: 40px;
-//         }
-        
-//         .cell-input {
-//           width: 100%;
-//           padding: 8px 10px;
-//           border: 1px solid #ddd;
-//           border-radius: 4px;
-//           font-size: 13px;
-//           box-sizing: border-box;
-//           transition: all 0.2s;
-//           background: white;
-//         }
-        
-//         .cell-input:focus {
-//           outline: none;
-//           border-color: #2196f3;
-//           box-shadow: 0 0 0 2px rgba(33, 150, 243, 0.1);
-//         }
-        
-//         .payer-select,
-//         .payment-system-select {
-//           width: 100%;
-//           padding: 8px 10px;
-//           border: 1px solid #ddd;
-//           border-radius: 4px;
-//           font-size: 13px;
-//           background-color: white;
-//           box-sizing: border-box;
-//           cursor: pointer;
-//         }
-        
-//         .comment-input {
-//           min-width: 150px;
-//         }
-        
-//         .license-plate-input {
-//           text-transform: uppercase;
-//         }
-        
-//         .loading-spinner {
-//           padding: 8px 12px;
-//           background-color: #e3f2fd;
-//           color: #1565c0;
-//           border-radius: 4px;
-//           font-size: 14px;
-//           min-width: 40px;
-//           text-align: center;
-//         }
-        
-//         .registry-table tbody tr {
-//           transition: background-color 0.1s;
-//         }
-//       `}</style>
-//     </div>
-//   );
-// };
-
-// export default RegistryPreview;
-import React, { useEffect, useState, useCallback, useRef } from "react";
+import React, { useState, useEffect, useCallback } from "react";
+import {
+  Box,
+  Button,
+  Paper,
+  Typography,
+  Chip,
+  IconButton,
+  Tooltip,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  TextField,
+  Alert,
+  Snackbar,
+  LinearProgress,
+  Menu,
+  MenuItem,
+  Divider,
+} from "@mui/material";
+import {
+  Edit as EditIcon,
+  Delete as DeleteIcon,
+  Save as SaveIcon,
+  Download as DownloadIcon,
+  Refresh as RefreshIcon,
+  Add as AddIcon,
+  Receipt as ReceiptIcon,
+  ContentCopy as ContentCopyIcon,
+  ContentPaste as ContentPasteIcon,  // ← исправлено
+} from "@mui/icons-material";
+import { DataGrid, GridToolbar } from "@mui/x-data-grid";
 import InvoiceMatchModal from "./InvoiceMatchModal";
-import "../styles.css";
+import EditCellModal from "./EditCellModal";
+import api from "../services/api";
+import { useAuth } from '../context/AuthContext';
+import { useWebSocket } from '../hooks/useWebSocket';
 
 const PAYERS = ["Сибуглеснаб", "ООО Ромашка", "ИП Иванов"];
 const PAYMENT_SYSTEMS = ["Предоплата", "Постоплата"];
 
-const RegistryPreview = ({ data, onReload }) => {
+const RegistryPreview = ({ data, onReload, batchId: propBatchId, canEdit = true }) => {
   const [rows, setRows] = useState([]);
-  const [originalRows, setOriginalRows] = useState([]);
+  const [batchId, setBatchId] = useState(propBatchId || "");
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [selectedItems, setSelectedItems] = useState([]);
   const [matchInvoice, setMatchInvoice] = useState(null);
   const [availableInvoices, setAvailableInvoices] = useState([]);
-  const [isLoading, setIsLoading] = useState(false);
-  const [exportLoading, setExportLoading] = useState(false);
-  const [debugInfo, setDebugInfo] = useState("");
-  const [batchId, setBatchId] = useState("");
-  const [selectedRowIndex, setSelectedRowIndex] = useState(null);
-  const [lastUpdatedRowId, setLastUpdatedRowId] = useState(null);
+  const [notification, setNotification] = useState({ open: false, message: "", severity: "info" });
   
-  // WebSocket состояния
-  const [wsConnected, setWsConnected] = useState(false);
-  const [notifications, setNotifications] = useState([]);
-  const wsRef = useRef(null);
-  const userId = localStorage.getItem('userId') || `user_${Math.random().toString(36).substr(2, 9)}`;
+  // Состояния для модальных окон
+  const [editModalOpen, setEditModalOpen] = useState(false);
+  const [editCellData, setEditCellData] = useState(null);
+  const [addRowDialogOpen, setAddRowDialogOpen] = useState(false);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [itemToDelete, setItemToDelete] = useState(null);
+  
+  // Состояния для копирования
+  const [contextMenu, setContextMenu] = useState(null);
+  const [copiedData, setCopiedData] = useState(null);
+  const [copySourceRow, setCopySourceRow] = useState(null);
+  const [copyField, setCopyField] = useState(null);
+  const [applyToDialogOpen, setApplyToDialogOpen] = useState(false);
+  const [applyField, setApplyField] = useState(null);
+  const [applyValue, setApplyValue] = useState("");
+  
 
-  // Инициализация WebSocket
-  useEffect(() => {
-    // Сохраняем userId если его нет
-    if (!localStorage.getItem('userId')) {
-      localStorage.setItem('userId', userId);
-    }
+const { user } = useAuth();
+const { lastMessage, connectionStatus, subscribeToBatch } = useWebSocket();
+  // Состояние для новой строки
+  const [newRowData, setNewRowData] = useState({
+    position: "",
+    supplier: "",
+    contractor: "",
+    payer: "Сибуглеснаб",
+    amount: "",
+    vat_amount: "",
+    payment_system: "Предоплата",
+    comment: "",
+    vehicle: "",
+    license_plate: "",
+  });
+  
+  const [paginationModel, setPaginationModel] = useState({ pageSize: 10, page: 0 });
 
-    const connectWebSocket = () => {
-      try {
-        const ws = new WebSocket(`ws://localhost:8000/ws/${userId}`);
-        
-        ws.onopen = () => {
-          console.log('✅ WebSocket connected');
-          setWsConnected(true);
-          setDebugInfo('WebSocket подключен');
-          
-          // Подписываемся на batch если есть
-          if (batchId) {
-            ws.send(JSON.stringify({
-              type: 'subscribe',
-              batch_id: batchId
-            }));
-          }
-        };
-        
-        ws.onmessage = (event) => {
-          try {
-            const data = JSON.parse(event.data);
-            console.log('📨 WebSocket message:', data);
-            
-            // Обрабатываем разные типы сообщений
-            switch (data.type) {
-              case 'invoice_processed':
-                handleInvoiceProcessed(data);
-                break;
-              
-              case 'invoice_applied':
-                handleInvoiceApplied(data);
-                break;
-              
-              case 'registry_updated':
-                handleRegistryUpdated(data);
-                break;
-              
-              case 'processing_status':
-                handleProcessingStatus(data);
-                break;
-              
-              case 'subscribed':
-                console.log(`✅ Подписан на batch: ${data.batch_id}`);
-                break;
-              
-              case 'pong':
-                // Ответ на ping, можно обновить timestamp
-                break;
-              
-              default:
-                console.log('Получено сообщение:', data);
-            }
-            
-            // Добавляем в историю уведомлений
-            setNotifications(prev => [...prev.slice(-9), data]);
-            
-          } catch (error) {
-            console.error('Ошибка обработки WebSocket сообщения:', error);
-          }
-        };
-        
-        ws.onclose = () => {
-          console.log('❌ WebSocket disconnected');
-          setWsConnected(false);
-          setDebugInfo('WebSocket отключен - переподключение...');
-          
-          // Переподключаемся через 3 секунды
-          setTimeout(connectWebSocket, 3000);
-        };
-        
-        ws.onerror = (error) => {
-          console.error('WebSocket error:', error);
-          setDebugInfo(`WebSocket ошибка: ${error.message}`);
-        };
-        
-        wsRef.current = ws;
-        
-        // Ping каждые 30 секунд для поддержания соединения
-        const pingInterval = setInterval(() => {
-          if (ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify({ type: 'ping' }));
-          }
-        }, 30000);
-        
-        return () => {
-          clearInterval(pingInterval);
-          if (ws.readyState === WebSocket.OPEN) {
-            ws.close();
-          }
-        };
-        
-      } catch (error) {
-        console.error('Ошибка подключения WebSocket:', error);
-        setDebugInfo(`Ошибка подключения: ${error.message}`);
-      }
-    };
-    
-    connectWebSocket();
-    
-    return () => {
-      if (wsRef.current?.readyState === WebSocket.OPEN) {
-        wsRef.current.close();
-      }
-    };
-  }, [userId]);
-
-  // Обработчик: обработка счета завершена
-  const handleInvoiceProcessed = (data) => {
-    console.log(`✅ Счет обработан: ${data.filename}`);
-    setDebugInfo(`Счет ${data.filename} обработан`);
-    
-    // Показываем уведомление
-    if ('Notification' in window && Notification.permission === 'granted') {
-      new Notification('Счет обработан', {
-        body: `${data.filename} готов для сопоставления`,
-        icon: '/favicon.ico'
-      });
-    }
-    
-    // Обновляем список счетов
-    if (batchId && batchId === data.batch_id) {
-      loadInvoices(batchId);
-    }
-    
-    // Обновляем реестр если нужно
-    if (onReload) {
-      setTimeout(() => onReload(), 1000);
-    }
-  };
-
-  // Обработчик: счет применен к строке (WebSocket)
-  const handleInvoiceApplied = (data) => {
-    console.log(`✅ Счет применен к строке ${data.registry_id}`);
-    setDebugInfo(`Счет применен к строке ${data.registry_id}`);
-    setLastUpdatedRowId(data.registry_id);
-    
-    // Обновляем локально строку
-    setRows(prevRows => 
-      prevRows.map(row => 
-        row.id === data.registry_id 
-          ? { 
-              ...row, 
-              invoice_id: data.invoice_id,
-              hasInvoice: true,
-              contractor: data.contractor || row.contractor,
-              lastUpdated: Date.now()
-            } 
-          : row
-      )
-    );
-  };
-
-  // Обработчик локального обновления (после закрытия модального окна)
-  const handleLocalInvoiceApplied = () => {
-    console.log("🔄 Информация о привязке обновлена локально");
-    setSelectedRowIndex(null);
-    
-    if (onReload) {
-      setTimeout(() => onReload(), 500);
-    }
-  };
-
-  // Обработчик: обновление реестра
-  const handleRegistryUpdated = (data) => {
-    console.log(`📋 Реестр обновлен: ${data.action}`);
-    if (data.action === 'created' || data.action === 'invoices_matched') {
-      if (onReload) {
-        setTimeout(() => onReload(), 500);
-      }
-    }
-  };
-
-  // Обработчик: статус обработки
-  const handleProcessingStatus = (data) => {
-    console.log(`🔄 Статус обработки: ${data.status}`);
-    if (data.progress !== undefined) {
-      setDebugInfo(`Обработка: ${data.status} (${data.progress}%)`);
-    } else {
-      setDebugInfo(`Обработка: ${data.status}`);
-    }
-  };
-
-  // Подписка на batch при изменении batchId
-  useEffect(() => {
-    if (wsRef.current?.readyState === WebSocket.OPEN && batchId) {
-      wsRef.current.send(JSON.stringify({
-        type: 'subscribe',
-        batch_id: batchId
-      }));
-      console.log(`✅ Подписан на batch: ${batchId}`);
-    }
-  }, [batchId]);
-
-  // Инициализация строк - сохраняем оригинальный порядок
+  // Инициализация строк из пропсов
   useEffect(() => {
     console.log("📊 Data received in RegistryPreview:", data);
     
     let registryData = [];
-    let extractedBatchId = "";
+    let extractedBatchId = propBatchId || "";
     
     if (Array.isArray(data)) {
       registryData = data;
-    } else if (data && typeof data === 'object') {
+    } else if (data && typeof data === "object") {
       if (data.registry_preview && Array.isArray(data.registry_preview)) {
         registryData = data.registry_preview;
-      } else if (Array.isArray(data)) {
-        registryData = data;
+      } else if (data.data && Array.isArray(data.data)) {
+        registryData = data.data;
       } else {
         for (const key in data) {
           if (Array.isArray(data[key]) && data[key].length > 0) {
@@ -1298,1035 +108,1066 @@ const RegistryPreview = ({ data, onReload }) => {
           }
         }
       }
+      if (data.batch_id && !extractedBatchId) {
+        extractedBatchId = data.batch_id;
+      }
     }
     
     if (registryData.length > 0) {
       console.log(`✅ Using ${registryData.length} registry items`);
-      setDebugInfo(`Получено ${registryData.length} строк реестра ${wsConnected ? '⚡' : ''}`);
       
-      const rowsWithOrder = registryData.map((r, index) => ({
+      const rowsWithIds = registryData.map((r, index) => ({
         ...r,
+        id: r.id || index,
+        position: r.position || index + 1,
         payer: r.payer || "Сибуглеснаб",
         payment_system: r.payment_system || "Предоплата",
-        included_in_plan: true,
-        displayOrder: r.position || index,
         hasInvoice: !!r.invoice_id,
-        originalId: r.id
       }));
       
-      rowsWithOrder.sort((a, b) => (a.displayOrder || 0) - (b.displayOrder || 0));
-
-      setOriginalRows(rowsWithOrder);
-      setRows(rowsWithOrder);
+      setRows(rowsWithIds);
       
-      if (rowsWithOrder.length > 0) {
-        const possibleBatchId = 
-          rowsWithOrder[0].batch_id || 
-          rowsWithOrder[0].imported_batch ||
-          (data && data.batch_id);
-        
-        if (possibleBatchId) {
-          setBatchId(possibleBatchId);
-          console.log(`✅ Extracted batch_id: ${possibleBatchId}`);
-        }
+      if (extractedBatchId) {
+        setBatchId(extractedBatchId);
       }
-      
-      const rowsWithInvoice = rowsWithOrder.filter(r => r.invoice_id).length;
-      console.log(`📊 Строк с привязанными счетами: ${rowsWithInvoice}/${rowsWithOrder.length}`);
     } else {
-      console.log(" No registry data found");
-      setDebugInfo("Нет данных реестра");
+      console.log("ℹ️ No registry data found");
       setRows([]);
-      setOriginalRows([]);
     }
-    
-  }, [data]);
+  }, [data, propBatchId]);
 
-  // Функция для экспорта в Excel
-  const exportToExcel = () => {
-    if (!rows.length) {
-      alert("Нет данных для экспорта");
+  // Загрузка доступных счетов
+  const loadInvoices = useCallback(async () => {
+    if (!batchId) return;
+    
+    try {
+      setLoading(true);
+      const response = await api.get(`/registry/${batchId}/invoices-from-buffer`);
+      if (response && response.invoices) {
+        setAvailableInvoices(response.invoices);
+      }
+    } catch (error) {
+      console.error("Error loading invoices:", error);
+    } finally {
+      setLoading(false);
+    }
+  }, [batchId]);
+
+  useEffect(() => {
+    if (batchId) {
+      loadInvoices();
+    }
+  }, [batchId, loadInvoices]);
+
+  useEffect(() => {
+  if (lastMessage) {
+    console.log('📨 WebSocket message received in RegistryPreview:', lastMessage);
+    
+    switch (lastMessage.type) {
+      case 'invoice_processed':
+        showNotification(`Счет обработан: ${lastMessage.filename}`, 'success');
+        loadInvoices();
+        if (onReload) onReload();
+        break;
+        
+      case 'invoice_applied':
+        showNotification(`Счет применен к строке ${lastMessage.registry_id}`, 'success');
+        if (onReload) setTimeout(() => onReload(), 500);
+        break;
+        
+      case 'registry_updated':
+        showNotification('Реестр обновлен', 'info');
+        if (onReload) onReload();
+        break;
+        
+      default:
+        break;
+    }
+  }
+}, [lastMessage, loadInvoices, onReload]);
+
+  const showNotification = (message, severity = "info") => {
+    setNotification({ open: true, message, severity });
+  };
+
+  // ========== РЕДАКТИРОВАНИЕ ЯЧЕЙКИ ==========
+  const handleEditModalSave = async (id, field, newValue) => {
+    if (!canEdit) {
+      showNotification("У вас нет прав на редактирование", "warning");
       return;
     }
 
-    const useOldFormat = confirm(
-      "Выберите формат экспорта:\n\n" +
-      "OK - XLS (старый Excel 97-2003)\n" +
-      "Отмена - CSV (откроется в современном Excel)\n\n" +
-      "XLS рекомендуется для очень старых версий Excel."
-    );
-
-    setExportLoading(true);
-    setDebugInfo("Подготовка экспорта...");
-
-    setTimeout(() => {
-      try {
-        if (useOldFormat) {
-          exportToXLS();
-        } else {
-          exportToCSV();
-        }
-        
-        setDebugInfo(`✅ Экспорт завершен: ${rows.length} строк`);
-      } catch (error) {
-        console.error("Ошибка при экспорте:", error);
-        setDebugInfo(`❌ Ошибка: ${error.message}`);
-        alert(`Ошибка при экспорте: ${error.message}`);
-      } finally {
-        setExportLoading(false);
-      }
-    }, 100);
-  };
-
-  // Экспорт в XLS
-  const exportToXLS = () => {
-    const headers = [
-      "Поставщик",
-      "Реквизиты счета",
-      "Контрагент",
-      "Плательщик",
-      "Сумма",
-      "в т.ч НДС",
-      "Учтено",
-      "Система расчетов",
-      "Комментарий",
-      "Техника",
-      "г.н"
-    ];
-
-    const dataRows = rows.map((row) => {
-      const invoiceDetails = row.invoice_details || {};
+    try {
+      // Локальное обновление
+      setRows(prev => prev.map(row => 
+        row.id === id ? { ...row, [field]: newValue } : row
+      ));
       
-      let invoiceText = "";
-      if (invoiceDetails.invoice_full_text) {
-        invoiceText = invoiceDetails.invoice_full_text;
-      } else if (invoiceDetails.invoice_number && invoiceDetails.invoice_date) {
-        invoiceText = `Счет на оплату № ${invoiceDetails.invoice_number} от ${invoiceDetails.invoice_date}`;
-      }
-
-      return [
-        row.supplier || "",
-        invoiceText,
-        row.contractor || "",
-        row.payer || "Сибуглеснаб",
-        row.amount || 0,
-        row.vat_amount || 0,
-        row.included_in_plan ? "Да" : "Нет",
-        row.payment_system || "Предоплата",
-        row.comment || "",
-        row.vehicle || "",
-        row.license_plate || ""
-      ];
-    });
-
-    const title = [
-      ["Реестр платежей"],
-      [`Экспортировано: ${new Date().toLocaleString('ru-RU')}`],
-      [`Всего строк: ${rows.length}`],
-      [`С привязанными счетами: ${rows.filter(r => r.invoice_id).length}`],
-      [`Batch ID: ${batchId || 'не указан'}`],
-      []
-    ];
-
-    const fullContent = [...title, headers, ...dataRows];
-    const csvContent = fullContent.map(row => 
-      row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join('\t')
-    ).join('\n');
-
-    const blob = new Blob(['\uFEFF' + csvContent], { 
-      type: 'text/plain;charset=utf-8'
-    });
-    
-    const fileName = `реестр_${batchId ? batchId.slice(0, 8) : "без_batch"}_${new Date().toISOString().slice(0, 10)}.xls`;
-    const link = document.createElement("a");
-    const url = URL.createObjectURL(blob);
-    
-    link.href = url;
-    link.download = fileName;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
+      showNotification(`Поле "${field}" обновлено`, "success");
+    } catch (error) {
+      console.error("Error updating field:", error);
+      showNotification(`Ошибка: ${error.message}`, "error");
+    }
   };
 
-  // Экспорт в CSV
-  const exportToCSV = () => {
+  // ========== КОПИРОВАНИЕ ДАННЫХ ==========
+  const handleCopyCell = (row, field, value) => {
+    let copyValue = value;
+    
+    // Для реквизитов счета берем полный текст
+    if (field === "invoice_full_text") {
+      copyValue = row.invoice_details?.invoice_full_text || row.invoice_full_text || "";
+    }
+    
+    setCopiedData({
+      field,
+      value: copyValue,
+      rowId: row.id,
+    });
+    setCopySourceRow(row);
+    setCopyField(field);
+    
+    // Копируем в буфер обмена
+    navigator.clipboard.writeText(String(copyValue || ""));
+    
+    showNotification(`Скопировано: ${getFieldLabel(field)}`, "success");
+  };
+
+  // ========== ПРИМЕНЕНИЕ КОПИРОВАННЫХ ДАННЫХ К ВЫБРАННЫМ СТРОКАМ ==========
+  const handleApplyToSelected = async () => {
+    if (!copiedData) {
+      showNotification("Нет скопированных данных", "warning");
+      return;
+    }
+    
+    if (selectedItems.length === 0) {
+      showNotification("Выберите строки для применения", "warning");
+      return;
+    }
+    
+    setApplyField(copiedData.field);
+    setApplyValue(copiedData.value);
+    setApplyToDialogOpen(true);
+  };
+
+  const confirmApplyToSelected = async () => {
+    try {
+      setSaving(true);
+      
+      // Применяем скопированное значение ко всем выбранным строкам
+      const updatedRows = rows.map(row => {
+        if (selectedItems.includes(row.id)) {
+          let newValue = applyValue;
+          
+          // Для реквизитов счета нужно обновить invoice_details
+          if (applyField === "invoice_full_text") {
+            return {
+              ...row,
+              invoice_full_text: newValue,
+              invoice_details: {
+                ...row.invoice_details,
+                invoice_full_text: newValue,
+              },
+            };
+          }
+          return { ...row, [applyField]: newValue };
+        }
+        return row;
+      });
+      
+      setRows(updatedRows);
+      showNotification(`Применено к ${selectedItems.length} строкам`, "success");
+      setApplyToDialogOpen(false);
+      setCopiedData(null);
+    } catch (error) {
+      console.error("Error applying to selected:", error);
+      showNotification(`Ошибка: ${error.message}`, "error");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // ========== КОНТЕКСТНОЕ МЕНЮ (ПРАВАЯ КНОПКА МЫШИ) ==========
+  const handleContextMenu = (event, row, field, value) => {
+    event.preventDefault();
+    setContextMenu({
+      mouseX: event.clientX - 2,
+      mouseY: event.clientY - 4,
+      row,
+      field,
+      value,
+    });
+  };
+
+  const handleCloseContextMenu = () => {
+    setContextMenu(null);
+  };
+
+  const handleContextMenuCopy = () => {
+    if (contextMenu) {
+      handleCopyCell(contextMenu.row, contextMenu.field, contextMenu.value);
+      handleCloseContextMenu();
+    }
+  };
+
+  const handleContextMenuApply = () => {
+    if (contextMenu && copiedData) {
+      // Применяем к текущей строке
+      handleEditModalSave(contextMenu.row.id, contextMenu.field, copiedData.value);
+      handleCloseContextMenu();
+    } else if (contextMenu && !copiedData) {
+      showNotification("Сначала скопируйте данные", "warning");
+      handleCloseContextMenu();
+    }
+  };
+
+  // ========== РЕДАКТИРУЕМАЯ ЯЧЕЙКА С КОПИРОВАНИЕМ ==========
+  const renderEditableCell = (params) => {
+    const { id, field, value, row } = params;
+
+    let displayValue = value;
+    let fullValue = value;
+    
+    if (field === "amount" || field === "vat_amount") {
+      displayValue = value ? Number(value).toFixed(2) : "-";
+      fullValue = value;
+    } else if (field === "position") {
+      displayValue = value || "-";
+      fullValue = value;
+    } else if (field === "invoice_full_text") {
+      // Для реквизитов счета берем из invoice_details
+      fullValue = row.invoice_details?.invoice_full_text || row.invoice_full_text || "";
+      displayValue = fullValue.length > 50 ? fullValue.substring(0, 50) + "..." : fullValue || "-";
+    } else {
+      displayValue = value || "-";
+      fullValue = value;
+    }
+
+    const handleOpenEditModal = () => {
+      if (!canEdit) {
+        showNotification("У вас нет прав на редактирование", "warning");
+        return;
+      }
+      
+      let editValue = fullValue;
+      if (field === "invoice_full_text") {
+        editValue = row.invoice_details?.invoice_full_text || row.invoice_full_text || "";
+      }
+      
+      setEditCellData({
+        id: id,
+        field: field,
+        value: editValue,
+        row: row,
+      });
+      setEditModalOpen(true);
+    };
+
+    return (
+      <Box
+        sx={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          width: "100%",
+          height: "100%",
+          pr: 0.5,
+          cursor: "context-menu",
+        }}
+        onContextMenu={(e) => handleContextMenu(e, row, field, fullValue)}
+      >
+        <Typography
+          variant="body2"
+          sx={{
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+            flex: 1,
+          }}
+          title={fullValue}
+        >
+          {displayValue}
+        </Typography>
+        <Box sx={{ display: "flex", gap: 0.5 }}>
+          <Tooltip title="Копировать">
+            <IconButton
+              size="small"
+              onClick={() => handleCopyCell(row, field, fullValue)}
+              sx={{ opacity: 0.5, "&:hover": { opacity: 1 } }}
+            >
+              <ContentCopyIcon fontSize="small" />
+            </IconButton>
+          </Tooltip>
+          {canEdit && (
+            <Tooltip title="Редактировать">
+              <IconButton
+                size="small"
+                onClick={handleOpenEditModal}
+                sx={{ opacity: 0.5, "&:hover": { opacity: 1 } }}
+              >
+                <EditIcon fontSize="small" />
+              </IconButton>
+            </Tooltip>
+          )}
+        </Box>
+      </Box>
+    );
+  };
+
+  // ========== ВЫБОР ПЛАТЕЛЬЩИКА ==========
+  const renderPayerCell = (params) => {
+    const value = params.row.payer || "Сибуглеснаб";
+    
+    return (
+      <Box
+        sx={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          width: "100%",
+        }}
+        onContextMenu={(e) => handleContextMenu(e, params.row, "payer", value)}
+      >
+        <select
+          value={value}
+          onChange={(e) => handleEditModalSave(params.id, "payer", e.target.value)}
+          style={{ 
+            width: "calc(100% - 40px)",
+            padding: "8px", 
+            borderRadius: "4px", 
+            border: "1px solid #ccc",
+            backgroundColor: canEdit ? "white" : "#f5f5f5",
+            cursor: canEdit ? "pointer" : "default"
+          }}
+          disabled={!canEdit}
+        >
+          {PAYERS.map(p => <option key={p} value={p}>{p}</option>)}
+        </select>
+        <Tooltip title="Копировать">
+          <IconButton
+            size="small"
+            onClick={() => handleCopyCell(params.row, "payer", value)}
+            sx={{ opacity: 0.5, "&:hover": { opacity: 1 } }}
+          >
+            <ContentCopyIcon fontSize="small" />
+          </IconButton>
+        </Tooltip>
+      </Box>
+    );
+  };
+
+  // ========== ВЫБОР СИСТЕМЫ РАСЧЕТОВ ==========
+  const renderPaymentSystemCell = (params) => {
+    const value = params.row.payment_system || "Предоплата";
+    
+    return (
+      <Box
+        sx={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          width: "100%",
+        }}
+        onContextMenu={(e) => handleContextMenu(e, params.row, "payment_system", value)}
+      >
+        <select
+          value={value}
+          onChange={(e) => handleEditModalSave(params.id, "payment_system", e.target.value)}
+          style={{ 
+            width: "calc(100% - 40px)",
+            padding: "8px", 
+            borderRadius: "4px", 
+            border: "1px solid #ccc",
+            backgroundColor: canEdit ? "white" : "#f5f5f5",
+            cursor: canEdit ? "pointer" : "default"
+          }}
+          disabled={!canEdit}
+        >
+          {PAYMENT_SYSTEMS.map(p => <option key={p} value={p}>{p}</option>)}
+        </select>
+        <Tooltip title="Копировать">
+          <IconButton
+            size="small"
+            onClick={() => handleCopyCell(params.row, "payment_system", value)}
+            sx={{ opacity: 0.5, "&:hover": { opacity: 1 } }}
+          >
+            <ContentCopyIcon fontSize="small" />
+          </IconButton>
+        </Tooltip>
+      </Box>
+    );
+  };
+
+  // ========== ЯЧЕЙКА РЕКВИЗИТОВ СЧЕТА ==========
+  const renderInvoiceTextCell = (params) => {
+    const invoiceText = params.row.invoice_details?.invoice_full_text || 
+                       params.row.invoice_full_text || "";
+    const displayText = invoiceText.length > 50 ? invoiceText.substring(0, 50) + "..." : invoiceText || "-";
+    
+    return (
+      <Box
+        sx={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          width: "100%",
+          cursor: "context-menu",
+        }}
+        onContextMenu={(e) => handleContextMenu(e, params.row, "invoice_full_text", invoiceText)}
+      >
+        <Typography
+          variant="body2"
+          sx={{
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+            flex: 1,
+          }}
+          title={invoiceText}
+        >
+          {displayText}
+        </Typography>
+        <Box sx={{ display: "flex", gap: 0.5 }}>
+          <Tooltip title="Копировать реквизиты">
+            <IconButton
+              size="small"
+              onClick={() => handleCopyCell(params.row, "invoice_full_text", invoiceText)}
+              sx={{ opacity: 0.5, "&:hover": { opacity: 1 } }}
+            >
+              <ContentCopyIcon fontSize="small" />
+            </IconButton>
+          </Tooltip>
+          {canEdit && (
+            <Tooltip title="Редактировать реквизиты">
+              <IconButton
+                size="small"
+                onClick={() => {
+                  setEditCellData({
+                    id: params.id,
+                    field: "invoice_full_text",
+                    value: invoiceText,
+                    row: params.row,
+                  });
+                  setEditModalOpen(true);
+                }}
+                sx={{ opacity: 0.5, "&:hover": { opacity: 1 } }}
+              >
+                <EditIcon fontSize="small" />
+              </IconButton>
+            </Tooltip>
+          )}
+        </Box>
+      </Box>
+    );
+  };
+
+  const getFieldLabel = (field) => {
+    const labels = {
+      position: "Позиция",
+      supplier: "Поставщик",
+      contractor: "Контрагент",
+      payer: "Плательщик",
+      amount: "Сумма",
+      vat_amount: "НДС",
+      payment_system: "Система расчетов",
+      comment: "Комментарий",
+      vehicle: "Техника",
+      license_plate: "Госномер",
+      invoice_full_text: "Реквизиты счета",
+    };
+    return labels[field] || field;
+  };
+
+  // ========== ДОБАВЛЕНИЕ НОВОЙ СТРОКИ ==========
+  const handleAddRow = async () => {
+    if (!canEdit) {
+      showNotification("У вас нет прав на добавление строк", "warning");
+      return;
+    }
+
+    try {
+      setSaving(true);
+      
+      const newRow = {
+        ...newRowData,
+        id: Date.now(),
+        position: parseInt(newRowData.position) || rows.length + 1,
+        amount: parseFloat(newRowData.amount) || 0,
+        vat_amount: parseFloat(newRowData.vat_amount) || 0,
+        batch_id: batchId,
+      };
+      
+      setRows(prev => [...prev, newRow]);
+      setAddRowDialogOpen(false);
+      setNewRowData({
+        position: "",
+        supplier: "",
+        contractor: "",
+        payer: "Сибуглеснаб",
+        amount: "",
+        vat_amount: "",
+        payment_system: "Предоплата",
+        comment: "",
+        vehicle: "",
+        license_plate: "",
+      });
+      showNotification("Строка добавлена", "success");
+    } catch (error) {
+      console.error("Error adding row:", error);
+      showNotification(`Ошибка: ${error.message}`, "error");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // ========== УДАЛЕНИЕ СТРОК ==========
+  const handleDeleteClick = (id) => {
+    if (!canEdit) {
+      showNotification("У вас нет прав на удаление строк", "warning");
+      return;
+    }
+    setItemToDelete(id);
+    setDeleteDialogOpen(true);
+  };
+
+  const handleDeleteSelected = () => {
+    if (!canEdit) {
+      showNotification("У вас нет прав на удаление строк", "warning");
+      return;
+    }
+    if (selectedItems.length === 0) {
+      showNotification("Выберите строки для удаления", "warning");
+      return;
+    }
+    setItemToDelete("selected");
+    setDeleteDialogOpen(true);
+  };
+
+  const confirmDelete = async () => {
+    try {
+      setSaving(true);
+      
+      if (itemToDelete === "selected") {
+        setRows(prev => prev.filter(row => !selectedItems.includes(row.id)));
+        setSelectedItems([]);
+        showNotification(`Удалено ${selectedItems.length} строк`, "success");
+      } else {
+        setRows(prev => prev.filter(row => row.id !== itemToDelete));
+        setSelectedItems(prev => prev.filter(id => id !== itemToDelete));
+        showNotification("Строка удалена", "success");
+      }
+    } catch (error) {
+      console.error("Error deleting:", error);
+      showNotification(`Ошибка: ${error.message}`, "error");
+    } finally {
+      setSaving(false);
+      setDeleteDialogOpen(false);
+      setItemToDelete(null);
+    }
+  };
+
+  // ========== СОХРАНЕНИЕ ВСЕХ ИЗМЕНЕНИЙ ==========
+  const handleSaveAll = async () => {
+    if (!canEdit) {
+      showNotification("У вас нет прав на сохранение", "warning");
+      return;
+    }
+
+    try {
+      setSaving(true);
+      showNotification("Все изменения сохранены", "success");
+    } catch (error) {
+      console.error("Error saving:", error);
+      showNotification(`Ошибка: ${error.message}`, "error");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // ========== ЭКСПОРТ ==========
+  const handleExport = () => {
+    if (!rows.length) {
+      showNotification("Нет данных для экспорта", "warning");
+      return;
+    }
+
     const headers = [
-      "Поставщик",
-      "Реквизиты счета",
-      "Контрагент",
-      "Плательщик",
-      "Сумма",
-      "в т.ч НДС",
-      "Учтено",
-      "Система расчетов",
-      "Комментарий",
-      "Техника",
-      "г.н"
+      "ID", "№", "Поставщик", "Реквизиты счета", "Контрагент", "Плательщик",
+      "Сумма", "в т.ч НДС", "Система расчетов", "Комментарий", "Техника", "г.н"
     ].join(";");
 
-    const dataRows = rows.map((row) => {
-      const invoiceDetails = row.invoice_details || {};
-      
-      let invoiceText = "";
-      if (invoiceDetails.invoice_full_text) {
-        invoiceText = invoiceDetails.invoice_full_text;
-      } else if (invoiceDetails.invoice_number && invoiceDetails.invoice_date) {
-        invoiceText = `Счет на оплату № ${invoiceDetails.invoice_number} от ${invoiceDetails.invoice_date}`;
-      }
-
+    const dataRows = rows.map(row => {
+      const invoiceText = row.invoice_details?.invoice_full_text || "";
       return [
+        row.id,
+        row.position || "",
         `"${(row.supplier || "").replace(/"/g, '""')}"`,
         `"${invoiceText.replace(/"/g, '""')}"`,
         `"${(row.contractor || "").replace(/"/g, '""')}"`,
-        `"${(row.payer || "").replace(/"/g, '""')}"`,
+        `"${(row.payer || "Сибуглеснаб").replace(/"/g, '""')}"`,
         row.amount || 0,
         row.vat_amount || 0,
-        row.included_in_plan ? "Да" : "Нет",
-        `"${(row.payment_system || "").replace(/"/g, '""')}"`,
+        `"${(row.payment_system || "Предоплата").replace(/"/g, '""')}"`,
         `"${(row.comment || "").replace(/"/g, '""')}"`,
         `"${(row.vehicle || "").replace(/"/g, '""')}"`,
-        `"${(row.license_plate || "").replace(/"/g, '""')}"`
+        `"${(row.license_plate || "").replace(/"/g, '""')}"`,
       ].join(";");
     });
 
     const csvContent = [headers, ...dataRows].join("\n");
-    const blob = new Blob(['\uFEFF' + csvContent], { 
-      type: 'text/csv;charset=utf-8;'
-    });
-    
-    const fileName = `реестр_${batchId ? batchId.slice(0, 8) : "без_batch"}_${new Date().toISOString().slice(0, 10)}.csv`;
-    const link = document.createElement("a");
+    const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8' });
     const url = URL.createObjectURL(blob);
-    
+    const link = document.createElement('a');
     link.href = url;
-    link.download = fileName;
-    document.body.appendChild(link);
+    link.download = `registry_${batchId || 'export'}_${new Date().toISOString().slice(0, 10)}.csv`;
     link.click();
-    document.body.removeChild(link);
     URL.revokeObjectURL(url);
+    
+    showNotification("Экспорт завершен", "success");
   };
 
-  // Функция для загрузки счетов
-  const loadInvoices = useCallback((batchId) => {
-    if (!batchId) {
-      console.log(" No batch_id provided for loading invoices");
-      setDebugInfo("Ошибка: batch_id не найден для загрузки счетов");
-      return;
+  // ========== ВЫБОР ВСЕХ / ОЧИСТКА ==========
+  const handleSelectAll = () => {
+    if (rows.length > 0) {
+      const allIds = rows.map((row) => row.id);
+      setSelectedItems(allIds);
     }
-    
-    setIsLoading(true);
-    setDebugInfo(`Загрузка счетов для batch: ${batchId}`);
-    
-    fetch(`http://localhost:8000/registry/${batchId}/invoices-from-buffer`)
-      .then(res => {
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        return res.json();
-      })
-      .then(result => {
-        if (result && Array.isArray(result.invoices)) {
-          setAvailableInvoices(result.invoices);
-          setDebugInfo(`Найдено счетов: ${result.invoices.length}`);
-        } else if (result && Array.isArray(result)) {
-          setAvailableInvoices(result);
-          setDebugInfo(`Найдено счетов: ${result.length}`);
-        } else {
-          setDebugInfo("Нет счетов в буфере");
-          setAvailableInvoices([]);
-        }
-      })
-      .catch(err => {
-        console.error(" Ошибка загрузки счетов:", err);
-        setDebugInfo(`Ошибка: ${err.message}`);
-        setAvailableInvoices([]);
-      })
-      .finally(() => {
-        setIsLoading(false);
-      });
-  }, []);
-
-  // Загружаем доступные счета из буфера при наличии batchId
-  useEffect(() => {
-    if (batchId) loadInvoices(batchId);
-  }, [batchId, loadInvoices]);
-
-  const updateRow = (index, field, value) => {
-    setRows((prev) =>
-      prev.map((row, i) => (i === index ? { ...row, [field]: value } : row))
-    );
   };
 
-  const handleRowSelect = (index) => {
-    setSelectedRowIndex(index);
-    setLastUpdatedRowId(null);
+  const handleClearSelection = () => {
+    setSelectedItems([]);
   };
 
-  const handleMatchClick = () => {
-    if (selectedRowIndex === null) {
-      alert("Пожалуйста, выберите строку реестра для сопоставления");
-      return;
-    }
-    
-    const row = rows[selectedRowIndex];
-    console.log(" Match click on selected row:", row);
-    
-    setMatchInvoice({
-      id: row.invoice_id || null,
-      details: row.invoice_details || {},
-      filename: row.invoice_details?.file || `Счет из буфера`,
-      registryRow: row,
-      registryRowIndex: selectedRowIndex,
-      registryRowId: row.id,
-      batchId: batchId || row.batch_id || rows[0]?.batch_id
-    });
-  };
-
-  const handleManualApply = (invoiceId, registryId, applyType, lineNos) => {
-    setIsLoading(true);
-    setDebugInfo(`Применение счета ${invoiceId?.slice(0,8) || 'unknown'}...`);
-    
-    let endpoint, requestBody;
-    const currentBatchId = batchId || rows[0]?.batch_id;
-    
-    if (applyType === "full" && lineNos && lineNos.length > 0) {
-      // Применение выбранных строк
-      if (lineNos.length === 1) {
-        // Одна строка
-        endpoint = "http://localhost:8000/invoice/apply-line";
-        requestBody = {
-          invoice_id: invoiceId,
-          line_no: lineNos[0],
-          registry_id: registryId,
-        };
-      } else {
-        // Несколько строк
-        endpoint = "http://localhost:8000/invoice/apply-multiple-lines";
-        requestBody = {
-          invoice_id: invoiceId,
-          line_nos: lineNos,
-          registry_id: registryId,
-          batch_id: currentBatchId
-        };
-      }
-    } else if (applyType === "full" && (!lineNos || lineNos.length === 0)) {
-      // Применение всего счета
-      endpoint = "http://localhost:8000/invoice/apply-all-lines";
-      requestBody = {
-        invoice_id: invoiceId,
-        registry_id: registryId,
-        batch_id: currentBatchId
-      };
-    } else {
-      // Ручное сопоставление
-      endpoint = "http://localhost:8000/invoice/manual-match";
-      requestBody = {
-        batch_id: currentBatchId,
-        registry_id: registryId,
-        invoice_id: invoiceId,
-        apply_type: applyType
-      };
-    }
-    
-    console.log(`📤 Sending to ${endpoint}:`, requestBody);
-    
-    fetch(endpoint, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(requestBody),
-    })
-    .then(res => {
-      if (!res.ok) {
-        throw new Error(`HTTP ${res.status}`);
-      }
-      return res.json();
-    })
-    .then(result => {
-      console.log("✅ Apply response:", result);
-      if (result.status === "ok") {
-        // Отправляем WebSocket уведомление
-        if (wsRef.current?.readyState === WebSocket.OPEN) {
-          wsRef.current.send(JSON.stringify({
-            type: 'invoice_applied',
-            batch_id: currentBatchId,
-            invoice_id: invoiceId,
-            registry_id: registryId,
-            contractor: result.contractor
-          }));
-        }
-        
-        updateRowLocally(registryId, invoiceId, result);
-        alert("✅ Счет успешно применен!");
-        setLastUpdatedRowId(registryId);
-        setMatchInvoice(null);
-        
-        if (onReload) {
-          setTimeout(() => {
-            onReload();
-          }, 1000);
-        }
-      } else {
-        throw new Error(result.message || "Ошибка применения");
-      }
-    })
-    .catch(err => {
-      console.error(" Ошибка применения счета:", err);
-      alert(` Ошибка: ${err.message}`);
-    })
-    .finally(() => {
-      setIsLoading(false);
-      setDebugInfo("Готово");
-    });
-  };
-
-  const updateRowLocally = (registryId, invoiceId, result) => {
-    console.log("🔄 Локальное обновление строки:", registryId);
-    
-    setRows(prevRows => {
-      return prevRows.map(row => {
-        if (row.id === registryId) {
-          const updatedRow = {
-            ...row,
-            invoice_id: invoiceId,
-            hasInvoice: true
-          };
-          
-          if (result.invoice_details) {
-            updatedRow.invoice_details = result.invoice_details;
-          }
-          
-          updatedRow.lastUpdated = Date.now();
-          
-          return updatedRow;
-        }
-        return row;
-      });
-    });
-    
-    setSelectedRowIndex(null);
-  };
-
-  useEffect(() => {
-    if (rows.length > 0 && originalRows.length > 0) {
-      const orderMap = new Map();
-      originalRows.forEach((row, index) => {
-        orderMap.set(row.id, index);
-      });
-      
-      const sortedRows = [...rows].sort((a, b) => {
-        const orderA = orderMap.get(a.id) || a.displayOrder || 0;
-        const orderB = orderMap.get(b.id) || b.displayOrder || 0;
-        return orderA - orderB;
-      });
-      
-      const needsSorting = sortedRows.some((row, index) => row.id !== rows[index]?.id);
-      if (needsSorting) {
-        console.log("🔄 Восстановление порядка строк");
-        setRows(sortedRows);
-      }
-    }
-  }, [rows, originalRows]);
+  // ========== КОЛОНКИ ТАБЛИЦЫ ==========
+  const columns = [
+    { field: "id", headerName: "ID", width: 70, type: "number" },
+    { field: "position", headerName: "№", width: 80, type: "number", renderCell: renderEditableCell },
+    { field: "supplier", headerName: "Поставщик", width: 200, renderCell: renderEditableCell },
+    { 
+      field: "invoice_full_text", 
+      headerName: "Реквизиты счета", 
+      width: 350,
+      renderCell: renderInvoiceTextCell
+    },
+    { field: "contractor", headerName: "Контрагент", width: 200, renderCell: renderEditableCell },
+    { field: "payer", headerName: "Плательщик", width: 150, renderCell: renderPayerCell },
+    { field: "amount", headerName: "Сумма", width: 120, type: "number", renderCell: renderEditableCell },
+    { field: "vat_amount", headerName: "в т.ч НДС", width: 100, type: "number", renderCell: renderEditableCell },
+    { field: "payment_system", headerName: "Система расчетов", width: 150, renderCell: renderPaymentSystemCell },
+    { field: "comment", headerName: "Комментарий", width: 250, renderCell: renderEditableCell },
+    { field: "vehicle", headerName: "Техника", width: 150, renderCell: renderEditableCell },
+    { field: "license_plate", headerName: "г.н", width: 120, renderCell: renderEditableCell },
+    {
+      field: "status",
+      headerName: "Статус",
+      width: 120,
+      renderCell: (params) => (
+        <Chip
+          label={params.row.invoice_id ? "Счет привязан" : "Ожидает"}
+          color={params.row.invoice_id ? "success" : "default"}
+          size="small"
+        />
+      )
+    },
+    {
+      field: "actions",
+      headerName: "Действия",
+      width: 130,
+      sortable: false,
+      filterable: false,
+      renderCell: (params) => (
+        <Box sx={{ display: "flex", gap: 0.5 }}>
+          <Tooltip title="Сопоставить счет">
+            <IconButton
+              size="small"
+              color="primary"
+              onClick={() => {
+                setMatchInvoice({
+                  id: params.row.invoice_id || null,
+                  details: params.row.invoice_details || {},
+                  registryRow: params.row,
+                  registryRowId: params.row.id,
+                  batchId: batchId,
+                });
+              }}
+            >
+              <ReceiptIcon fontSize="small" />
+            </IconButton>
+          </Tooltip>
+          {canEdit && (
+            <Tooltip title="Удалить строку">
+              <IconButton
+                size="small"
+                color="error"
+                onClick={() => handleDeleteClick(params.id)}
+              >
+                <DeleteIcon fontSize="small" />
+              </IconButton>
+            </Tooltip>
+          )}
+        </Box>
+      )
+    },
+  ];
 
   if (!rows.length) {
     return (
-      <div className="requests-table" style={{ textAlign: "center", padding: "40px" }}>
-        <h3> Реестр не сформирован</h3>
-        <p>Загрузите документ, чтобы увидеть предпросмотр</p>
-      </div>
+      <Paper sx={{ p: 4, textAlign: "center" }}>
+        <Typography variant="h6" color="text.secondary" gutterBottom>
+          Реестр не сформирован
+        </Typography>
+        <Typography variant="body2" color="text.secondary">
+          Загрузите документ, чтобы увидеть предпросмотр
+        </Typography>
+      </Paper>
     );
   }
 
-  const rowsWithInvoice = rows.filter(r => r.invoice_id).length;
-
   return (
-    <div className="registry-container">
-      <div className="registry-header">
-        <div className="header-content">
-          <div className="header-left">
-            <h3> Предпросмотр реестра {wsConnected ? '⚡' : '🔌'}</h3>
-            <p className="header-stats">
-              Всего строк: <strong>{rows.length}</strong> | 
-              С привязанными счетами: <strong style={{ color: rowsWithInvoice > 0 ? "#28a745" : "#dc3545" }}>
-                {rowsWithInvoice}
-              </strong> | 
-              Доступно счетов: <strong style={{ color: availableInvoices.length > 0 ? "#28a745" : "#dc3545" }}>
-                {availableInvoices.length}
-              </strong>
-              {batchId && ` | Batch: ${batchId.slice(0, 8)}...`}
-              {selectedRowIndex !== null && ` | Выбрана строка: ${selectedRowIndex + 1}`}
-              {lastUpdatedRowId && ` | Обновлена строка: ID ${lastUpdatedRowId}`}
-            </p>
-          </div>
-          <div className="header-right">
-            <div className="debug-info">
-              <div>{debugInfo}</div>
-              <div className="ws-status" style={{ 
-                fontSize: '10px', 
-                color: wsConnected ? '#28a745' : '#dc3545',
-                marginTop: '2px'
-              }}>
-                {wsConnected ? '⚡ WebSocket подключен' : '🔌 WebSocket отключен'}
-              </div>
-            </div>
-            
-            <button 
-              onClick={handleMatchClick}
-              className="header-btn match-btn"
-              disabled={selectedRowIndex === null || !availableInvoices.length || isLoading}
-              title={selectedRowIndex === null ? "Выберите строку реестра" : "Сопоставить счет с выбранной строкой"}
+    <Box>
+      {/* Панель управления */}
+      <Paper sx={{ p: 2, mb: 2 }}>
+        <Box sx={{ display: "flex", gap: 2, alignItems: "center", flexWrap: "wrap" }}>
+          <Chip label={`Записей: ${rows.length}`} color="info" variant="outlined" />
+          <Chip label={`Выбрано: ${selectedItems.length}`} variant="outlined" />
+          <Chip 
+            label={`Счетов доступно: ${availableInvoices.length}`} 
+            color={availableInvoices.length > 0 ? "success" : "default"}
+            variant="outlined"
+          />
+          
+          {copiedData && (
+            <Chip 
+              label={`Скопировано: ${getFieldLabel(copiedData.field)}`}
+              color="primary"
+              size="small"
+              onDelete={() => setCopiedData(null)}
+            />
+          )}
+          
+          <Box sx={{ flexGrow: 1 }} />
+          
+          <Tooltip title="Обновить">
+            <IconButton onClick={() => onReload && onReload()} disabled={loading}>
+              <RefreshIcon />
+            </IconButton>
+          </Tooltip>
+          
+          {canEdit && (
+            <>
+              <Button
+                variant="outlined"
+                color="warning"
+                size="small"
+                onClick={handleSelectAll}
+                disabled={rows.length === 0}
+              >
+                Выбрать все
+              </Button>
+              
+              <Button
+                variant="outlined"
+                color="warning"
+                size="small"
+                onClick={handleClearSelection}
+                disabled={selectedItems.length === 0}
+              >
+                Очистить
+              </Button>
+              
+              <Button
+                variant="contained"
+                color="success"
+                size="small"
+                startIcon={<AddIcon />}
+                onClick={() => setAddRowDialogOpen(true)}
+              >
+                Добавить строку
+              </Button>
+              
+              <Button
+                variant="outlined"
+                color="error"
+                size="small"
+                startIcon={<DeleteIcon />}
+                onClick={handleDeleteSelected}
+                disabled={selectedItems.length === 0}
+              >
+                Удалить выбранные ({selectedItems.length})
+              </Button>
+              
+              {copiedData && (
+                <Button
+                  variant="contained"
+                  color="secondary"
+                  size="small"
+                  startIcon={<ContentPasteIcon />}
+                  onClick={handleApplyToSelected}
+                  disabled={selectedItems.length === 0}
+                >
+                  Применить к выбранным ({selectedItems.length})
+                </Button>
+              )}
+              
+              <Button
+                variant="contained"
+                color="primary"
+                size="small"
+                startIcon={<SaveIcon />}
+                onClick={handleSaveAll}
+                disabled={saving}
+              >
+                {saving ? "Сохранение..." : "Сохранить"}
+              </Button>
+            </>
+          )}
+          
+          <Button
+            variant="outlined"
+            color="secondary"
+            size="small"
+            startIcon={<DownloadIcon />}
+            onClick={handleExport}
+          >
+            Экспорт
+          </Button>
+        </Box>
+      </Paper>
+      
+      {saving && <LinearProgress sx={{ mb: 2 }} />}
+      
+      {/* Таблица данных */}
+      <Paper sx={{ height: 600, width: "100%" }}>
+        <DataGrid
+          rows={rows}
+          columns={columns}
+          checkboxSelection={canEdit}
+          loading={loading}
+          onRowSelectionModelChange={(newSelection) => setSelectedItems(newSelection)}
+          rowSelectionModel={selectedItems}
+          getRowId={(row) => row.id}
+          paginationModel={paginationModel}
+          onPaginationModelChange={setPaginationModel}
+          pageSizeOptions={[10, 25, 50]}
+          slots={{ toolbar: GridToolbar }}
+          sx={{ "& .MuiDataGrid-cell:focus-within": { outline: "none" } }}
+        />
+      </Paper>
+      
+      {/* Контекстное меню (правая кнопка мыши) */}
+      <Menu
+        open={contextMenu !== null}
+        onClose={handleCloseContextMenu}
+        anchorReference="anchorPosition"
+        anchorPosition={
+          contextMenu !== null
+            ? { top: contextMenu.mouseY, left: contextMenu.mouseX }
+            : undefined
+        }
+      >
+        <MenuItem onClick={handleContextMenuCopy}>
+          <ContentCopyIcon fontSize="small" sx={{ mr: 1 }} />
+          Копировать {contextMenu && getFieldLabel(contextMenu.field)}
+        </MenuItem>
+        {copiedData && canEdit && (
+          <MenuItem onClick={handleContextMenuApply}>
+            <ContentPasteIcon fontSize="small" sx={{ mr: 1 }} />
+            Вставить в эту строку
+          </MenuItem>
+        )}
+        <Divider />
+        <MenuItem onClick={handleCloseContextMenu}>Отмена</MenuItem>
+      </Menu>
+      
+      {/* Модальное окно редактирования ячейки */}
+      <EditCellModal
+        open={editModalOpen}
+        onClose={() => {
+          setEditModalOpen(false);
+          setEditCellData(null);
+        }}
+        onSave={handleEditModalSave}
+        cellData={editCellData}
+      />
+      
+      {/* Диалог применения к выбранным строкам */}
+      <Dialog open={applyToDialogOpen} onClose={() => setApplyToDialogOpen(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>Применить к выбранным строкам</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" sx={{ mb: 2 }}>
+            Вы уверены, что хотите применить значение
+          </Typography>
+          <Paper sx={{ p: 2, bgcolor: "#f5f5f5", mb: 2 }}>
+            <Typography variant="body2" color="text.secondary">
+              Поле: <strong>{getFieldLabel(applyField)}</strong>
+            </Typography>
+            <Typography variant="body2" color="text.secondary">
+              Значение: <strong>{applyValue}</strong>
+            </Typography>
+          </Paper>
+          <Typography variant="body2" color="error">
+            к {selectedItems.length} выбранным строкам?
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setApplyToDialogOpen(false)}>Отмена</Button>
+          <Button onClick={confirmApplyToSelected} variant="contained" color="primary">
+            Применить
+          </Button>
+        </DialogActions>
+      </Dialog>
+      
+      {/* Диалог добавления строки */}
+      <Dialog open={addRowDialogOpen} onClose={() => setAddRowDialogOpen(false)} maxWidth="md" fullWidth>
+        <DialogTitle>Добавление строки</DialogTitle>
+        <DialogContent>
+          <Box sx={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 2, mt: 1 }}>
+            <TextField
+              label="Позиция"
+              type="number"
+              value={newRowData.position}
+              onChange={(e) => setNewRowData(prev => ({ ...prev, position: e.target.value }))}
+              fullWidth
+            />
+            <TextField
+              label="Поставщик"
+              value={newRowData.supplier}
+              onChange={(e) => setNewRowData(prev => ({ ...prev, supplier: e.target.value }))}
+              fullWidth
+            />
+            <TextField
+              label="Контрагент"
+              value={newRowData.contractor}
+              onChange={(e) => setNewRowData(prev => ({ ...prev, contractor: e.target.value }))}
+              fullWidth
+            />
+            <TextField
+              select
+              label="Плательщик"
+              value={newRowData.payer}
+              onChange={(e) => setNewRowData(prev => ({ ...prev, payer: e.target.value }))}
+              fullWidth
+              SelectProps={{ native: true }}
             >
-              🎯 Сопоставить
-            </button>
-            
-            <button 
-              onClick={exportToExcel}
-              className="header-btn excel-btn"
-              disabled={!rows.length || exportLoading || isLoading}
-              title="Экспорт в Excel"
+              {PAYERS.map(p => <option key={p} value={p}>{p}</option>)}
+            </TextField>
+            <TextField
+              label="Сумма"
+              type="number"
+              value={newRowData.amount}
+              onChange={(e) => setNewRowData(prev => ({ ...prev, amount: e.target.value }))}
+              fullWidth
+            />
+            <TextField
+              label="НДС"
+              type="number"
+              value={newRowData.vat_amount}
+              onChange={(e) => setNewRowData(prev => ({ ...prev, vat_amount: e.target.value }))}
+              fullWidth
+            />
+            <TextField
+              select
+              label="Система расчетов"
+              value={newRowData.payment_system}
+              onChange={(e) => setNewRowData(prev => ({ ...prev, payment_system: e.target.value }))}
+              fullWidth
+              SelectProps={{ native: true }}
             >
-              {exportLoading ? "⏳" : "📊 Excel"}
-            </button>
-            
-            <button 
-              onClick={() => batchId && loadInvoices(batchId)}
-              className="header-btn refresh-btn"
-              title="Обновить список счетов"
-              disabled={isLoading || exportLoading}
-            >
-              🔄 Обновить
-            </button>
-            
-            {(isLoading || exportLoading) && <div className="loading-spinner">🔄</div>}
-          </div>
-        </div>
-      </div>
-
-      <div className="registry-table-container">
-        <div className="registry-table-wrapper">
-          <table className="registry-table">
-            <thead>
-              <tr>
-                <th style={{ width: "50px" }}>Выбор</th>
-                <th style={{ width: "70px" }}>№</th>
-                <th style={{ minWidth: "180px" }}>Поставщик</th>
-                <th style={{ minWidth: "350px" }}>Реквизиты счета</th>
-                <th style={{ minWidth: "200px" }}>Контрагент</th>
-                <th style={{ width: "140px" }}>Плательщик</th>
-                <th style={{ width: "120px" }}>Сумма</th>
-                <th style={{ width: "100px" }}>в т.ч НДС</th>
-                <th style={{ width: "90px" }}>Учтено</th>
-                <th style={{ width: "150px" }}>Система расчетов</th>
-                <th style={{ minWidth: "200px" }}>Комментарий</th>
-                <th style={{ minWidth: "150px" }}>Техника</th>
-                <th style={{ width: "120px" }}>г.н</th>
-              </tr>
-            </thead>
-
-            <tbody>
-              {rows.map((r, i) => {
-                const d = r.invoice_details || {};
-                
-                let invoiceText = "";
-                let hasInvoiceText = false;
-                
-                if (d.invoice_full_text) {
-                  invoiceText = d.invoice_full_text;
-                  hasInvoiceText = true;
-                } else if (d.invoice_number && d.invoice_date) {
-                  invoiceText = `Счет на оплату № ${d.invoice_number} от ${d.invoice_date}`;
-                  hasInvoiceText = true;
-                } else if (d.invoice_number) {
-                  invoiceText = `Счет № ${d.invoice_number}`;
-                  hasInvoiceText = true;
-                } else if (d.invoice_date) {
-                  invoiceText = `Счет от ${d.invoice_date}`;
-                  hasInvoiceText = true;
-                }
-
-                const hasInvoice = !!r.invoice_id;
-                const isSelected = selectedRowIndex === i;
-                const isRecentlyUpdated = lastUpdatedRowId === r.id;
-                
-                return (
-                  <tr 
-                    key={`${r.id}-${r.lastUpdated || ''}`}
-                    className={`
-                      ${hasInvoice ? "has-invoice-row" : ""} 
-                      ${isSelected ? "selected-row" : ""}
-                      ${isRecentlyUpdated ? "recently-updated-row" : ""}
-                    `}
-                    onClick={() => handleRowSelect(i)}
-                  >
-                    <td>
-                      <div className="selection-cell">
-                        <input
-                          type="radio"
-                          name="selected-row"
-                          checked={isSelected}
-                          onChange={() => handleRowSelect(i)}
-                          title="Выбрать эту строку для сопоставления"
-                          onClick={(e) => e.stopPropagation()}
-                        />
-                      </div>
-                    </td>
-
-                    <td className="row-id">{r.id}</td>
-
-                    <td>
-                      <input
-                        className="cell-input"
-                        value={r.supplier || ""}
-                        onChange={(e) => updateRow(i, "supplier", e.target.value)}
-                        onClick={(e) => e.stopPropagation()}
-                        placeholder="Введите поставщика"
-                      />
-                    </td>
-
-                    <td className="invoice-details-cell">
-                      {hasInvoiceText ? (
-                        <div>
-                          <div className="invoice-title">
-                            {invoiceText}
-                            {isRecentlyUpdated && <span className="update-badge">НОВОЕ</span>}
-                          </div>
-                        </div>
-                      ) : (
-                        <span className="no-invoice-text">
-                          {isSelected ? "⬅ Выбрано для сопоставления" : "Счет не привязан"}
-                        </span>
-                      )}
-                    </td>
-
-                    <td>
-                      <div className="contractor-cell">
-                        {r.contractor ? (
-                          <span className="contractor-name">{r.contractor}</span>
-                        ) : (
-                          <span className="empty-field">—</span>
-                        )}
-                      </div>
-                    </td>
-
-                    <td>
-                      <select
-                        className="payer-select"
-                        value={r.payer}
-                        onChange={(e) => updateRow(i, "payer", e.target.value)}
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        {PAYERS.map((p) => (
-                          <option key={p} value={p}>
-                            {p}
-                          </option>
-                        ))}
-                      </select>
-                    </td>
-
-                    <td className="amount-cell">
-                      {r.amount ? (
-                        <span className="amount-value">
-                          {r.amount}
-                        </span>
-                      ) : (
-                        <span className="empty-field">—</span>
-                      )}
-                    </td>
-
-                    <td>{r.vat_amount || <span className="empty-field">—</span>}</td>
-
-                    <td className="included-cell">
-                      <span className="included-badge">Да</span>
-                    </td>
-
-                    <td>
-                      <select
-                        className="payment-system-select"
-                        value={r.payment_system}
-                        onChange={(e) => updateRow(i, "payment_system", e.target.value)}
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        {PAYMENT_SYSTEMS.map((p) => (
-                          <option key={p} value={p}>
-                            {p}
-                          </option>
-                        ))}
-                      </select>
-                    </td>
-
-                    <td>
-                      <input
-                        className="cell-input comment-input"
-                        value={r.comment || ""}
-                        onChange={(e) => updateRow(i, "comment", e.target.value)}
-                        onClick={(e) => e.stopPropagation()}
-                        placeholder="Комментарий"
-                      />
-                    </td>
-
-                    <td>
-                      <input
-                        className="cell-input"
-                        value={r.vehicle || ""}
-                        onChange={(e) => updateRow(i, "vehicle", e.target.value)}
-                        onClick={(e) => e.stopPropagation()}
-                        placeholder="Модель"
-                      />
-                    </td>
-
-                    <td>
-                      <input
-                        className="cell-input license-plate-input"
-                        value={r.license_plate || ""}
-                        onChange={(e) => updateRow(i, "license_plate", e.target.value)}
-                        onClick={(e) => e.stopPropagation()}
-                        placeholder="A000AA"
-                      />
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
+              {PAYMENT_SYSTEMS.map(p => <option key={p} value={p}>{p}</option>)}
+            </TextField>
+            <TextField
+              label="Комментарий"
+              value={newRowData.comment}
+              onChange={(e) => setNewRowData(prev => ({ ...prev, comment: e.target.value }))}
+              fullWidth
+              multiline
+              rows={2}
+            />
+            <TextField
+              label="Техника"
+              value={newRowData.vehicle}
+              onChange={(e) => setNewRowData(prev => ({ ...prev, vehicle: e.target.value }))}
+              fullWidth
+            />
+            <TextField
+              label="Госномер"
+              value={newRowData.license_plate}
+              onChange={(e) => setNewRowData(prev => ({ ...prev, license_plate: e.target.value }))}
+              fullWidth
+              placeholder="A000AA"
+            />
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setAddRowDialogOpen(false)}>Отмена</Button>
+          <Button onClick={handleAddRow} variant="contained" disabled={saving}>
+            Добавить
+          </Button>
+        </DialogActions>
+      </Dialog>
+      
+      {/* Диалог подтверждения удаления */}
+      <Dialog open={deleteDialogOpen} onClose={() => setDeleteDialogOpen(false)}>
+        <DialogTitle>Подтверждение удаления</DialogTitle>
+        <DialogContent>
+          <Typography>
+            {itemToDelete === "selected"
+              ? `Вы уверены, что хотите удалить ${selectedItems.length} выбранных строк?`
+              : "Вы уверены, что хотите удалить эту строку?"}
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setDeleteDialogOpen(false)}>Отмена</Button>
+          <Button onClick={confirmDelete} color="error" variant="contained">
+            Удалить
+          </Button>
+        </DialogActions>
+      </Dialog>
+      
+      {/* Модальное окно сопоставления счета */}
       {matchInvoice && (
         <InvoiceMatchModal
           invoice={matchInvoice}
-          registryRows={[rows[selectedRowIndex]]}
+          registryRows={[rows.find(r => r.id === matchInvoice.registryRowId)]}
           selectedRegistryRowId={matchInvoice.registryRowId}
           availableInvoices={availableInvoices}
           onClose={() => {
             setMatchInvoice(null);
-            setSelectedRowIndex(null);
+            if (onReload) onReload();
           }}
-          onApplied={handleLocalInvoiceApplied}
-          onManualApply={handleManualApply}
+          onApplied={() => {
+            setMatchInvoice(null);
+            if (onReload) setTimeout(() => onReload(), 500);
+          }}
+          onManualApply={async (invoiceId, registryId, applyType, lineNos) => {
+            try {
+              const response = await api.post("/invoice/manual-match", {
+                batch_id: batchId,
+                registry_id: registryId,
+                invoice_id: invoiceId,
+                apply_type: applyType,
+              });
+              if (response.status === "ok") {
+                showNotification("Счет успешно применен", "success");
+                if (onReload) setTimeout(() => onReload(), 500);
+              }
+            } catch (error) {
+              console.error("Error applying invoice:", error);
+              showNotification(`Ошибка: ${error.message}`, "error");
+            }
+          }}
         />
       )}
-
-      <style jsx>{`
-        .registry-container {
-          display: flex;
-          flex-direction: column;
-          height: 100vh;
-          max-height: 100vh;
-          overflow: hidden;
-        }
-        
-        .registry-header {
-          flex-shrink: 0;
-          padding: 12px 20px;
-          border-bottom: 1px solid #e0e0e0;
-          background: #f5f7fa;
-          box-shadow: 0 2px 4px rgba(0,0,0,0.05);
-        }
-        
-        .header-content {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          gap: 20px;
-        }
-        
-        .header-left {
-          flex: 1;
-        }
-        
-        .header-left h3 {
-          margin: 0;
-          font-size: 18px;
-          color: #2c3e50;
-        }
-        
-        .header-right {
-          display: flex;
-          gap: 10px;
-          align-items: center;
-        }
-        
-        .header-stats {
-          color: #546e7a;
-          font-size: 13px;
-          margin: 6px 0 0 0;
-        }
-        
-        .debug-info {
-          font-size: 12px;
-          color: #78909c;
-          text-align: right;
-          margin-right: 10px;
-          min-width: 150px;
-        }
-        
-        .header-btn {
-          padding: 8px 16px;
-          border: none;
-          border-radius: 6px;
-          font-size: 13px;
-          font-weight: 500;
-          cursor: pointer;
-          transition: all 0.2s;
-          display: flex;
-          align-items: center;
-          gap: 6px;
-          white-space: nowrap;
-        }
-        
-        .header-btn:disabled {
-          opacity: 0.5;
-          cursor: not-allowed;
-          transform: none !important;
-        }
-        
-        .match-btn {
-          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-          color: white;
-          box-shadow: 0 2px 4px rgba(102, 126, 234, 0.3);
-        }
-        
-        .match-btn:hover:not(:disabled) {
-          background: linear-gradient(135deg, #5a6fd8 0%, #6b3f8f 100%);
-          transform: translateY(-2px);
-          box-shadow: 0 4px 8px rgba(102, 126, 234, 0.4);
-        }
-        
-        .excel-btn {
-          background: linear-gradient(135deg, #4CAF50 0%, #2E7D32 100%);
-          color: white;
-          box-shadow: 0 2px 4px rgba(76, 175, 80, 0.3);
-        }
-        
-        .excel-btn:hover:not(:disabled) {
-          background: linear-gradient(135deg, #43A047 0%, #1B5E20 100%);
-          transform: translateY(-2px);
-          box-shadow: 0 4px 8px rgba(76, 175, 80, 0.4);
-        }
-        
-        .refresh-btn {
-          background: linear-gradient(135deg, #2196F3 0%, #0D47A1 100%);
-          color: white;
-          box-shadow: 0 2px 4px rgba(33, 150, 243, 0.3);
-        }
-        
-        .refresh-btn:hover:not(:disabled) {
-          background: linear-gradient(135deg, #1E88E5 0%, #1565C0 100%);
-          transform: translateY(-2px);
-          box-shadow: 0 4px 8px rgba(33, 150, 243, 0.4);
-        }
-        
-        .registry-table-container {
-          flex: 1;
-          overflow: auto;
-          position: relative;
-          background: #fff;
-        }
-        
-        .registry-table-wrapper {
-          overflow-x: auto;
-          overflow-y: auto;
-          height: 100%;
-        }
-        
-        .registry-table {
-          width: 100%;
-          min-width: 1400px;
-          border-collapse: separate;
-          border-spacing: 0;
-        }
-        
-        .registry-table th {
-          background: #f8f9fa;
-          position: sticky;
-          top: 0;
-          z-index: 10;
-          border-bottom: 2px solid #e0e0e0;
-          font-weight: 600;
-          color: #37474f;
-          padding: 12px 10px;
-          text-align: left;
-          font-size: 13px;
-        }
-        
-        .registry-table td {
-          padding: 10px 10px;
-          vertical-align: middle;
-          white-space: normal;
-          border-bottom: 1px solid #f0f0f0;
-          font-size: 13px;
-          transition: background-color 0.3s ease;
-        }
-        
-        .row-id {
-          font-weight: 600;
-          color: #37474f;
-          font-family: monospace;
-        }
-        
-        .registry-table tbody tr {
-          cursor: pointer;
-        }
-        
-        .registry-table tbody tr:hover {
-          background-color: #f8fafc !important;
-        }
-        
-        .has-invoice-row {
-          background-color: #f0f9f0 !important;
-        }
-        
-        .has-invoice-row:hover {
-          background-color: #e8f5e9 !important;
-        }
-        
-        .selected-row {
-          background-color: #e3f2fd !important;
-          position: relative;
-        }
-        
-        .selected-row::after {
-          content: '';
-          position: absolute;
-          left: 0;
-          top: 0;
-          bottom: 0;
-          width: 4px;
-          background: linear-gradient(180deg, #667eea 0%, #764ba2 100%);
-        }
-        
-        .recently-updated-row {
-          animation: highlight-pulse 2s ease-in-out;
-          background-color: #fff8e1 !important;
-        }
-        
-        @keyframes highlight-pulse {
-          0% { background-color: #fff8e1; }
-          50% { background-color: #fff3e0; }
-          100% { background-color: #fff8e1; }
-        }
-        
-        .selection-cell {
-          text-align: center;
-        }
-        
-        .selection-cell input[type="radio"] {
-          cursor: pointer;
-          transform: scale(1.2);
-          accent-color: #667eea;
-        }
-        
-        .invoice-details-cell {
-          line-height: 1.4;
-        }
-        
-        .invoice-title {
-          font-weight: 500;
-          color: #2c3e50;
-          font-size: 14px;
-          display: flex;
-          align-items: center;
-          gap: 8px;
-        }
-        
-        .update-badge {
-          background: linear-gradient(135deg, #ff9800 0%, #f57c00 100%);
-          color: white;
-          padding: 2px 6px;
-          border-radius: 4px;
-          font-size: 10px;
-          font-weight: 600;
-          animation: pulse 1.5s infinite;
-        }
-        
-        @keyframes pulse {
-          0% { opacity: 1; }
-          50% { opacity: 0.7; }
-          100% { opacity: 1; }
-        }
-        
-        .no-invoice-text {
-          font-style: italic;
-          color: #90a4ae;
-          font-size: 13px;
-        }
-        
-        .contractor-name {
-          font-weight: 500;
-        }
-        
-        .empty-field {
-          color: #b0bec5;
-          font-style: italic;
-        }
-        
-        .amount-value {
-          font-weight: 600;
-          color: #4caf50;
-        }
-        
-        .included-badge {
-          display: inline-block;
-          padding: 4px 10px;
-          background: linear-gradient(135deg, #81c784 0%, #66bb6a 100%);
-          color: white;
-          border-radius: 12px;
-          font-size: 12px;
-          font-weight: 500;
-          text-align: center;
-          min-width: 40px;
-        }
-        
-        .cell-input {
-          width: 100%;
-          padding: 8px 10px;
-          border: 1px solid #ddd;
-          border-radius: 4px;
-          font-size: 13px;
-          box-sizing: border-box;
-          transition: all 0.2s;
-          background: white;
-        }
-        
-        .cell-input:focus {
-          outline: none;
-          border-color: #2196f3;
-          box-shadow: 0 0 0 2px rgba(33, 150, 243, 0.1);
-        }
-        
-        .payer-select,
-        .payment-system-select {
-          width: 100%;
-          padding: 8px 10px;
-          border: 1px solid #ddd;
-          border-radius: 4px;
-          font-size: 13px;
-          background-color: white;
-          box-sizing: border-box;
-          cursor: pointer;
-        }
-        
-        .comment-input {
-          min-width: 150px;
-        }
-        
-        .license-plate-input {
-          text-transform: uppercase;
-        }
-        
-        .loading-spinner {
-          padding: 8px 12px;
-          background-color: #e3f2fd;
-          color: #1565c0;
-          border-radius: 4px;
-          font-size: 14px;
-          min-width: 40px;
-          text-align: center;
-        }
-        
-        .registry-table tbody tr {
-          transition: background-color 0.1s;
-        }
-      `}</style>
-    </div>
+      
+      {/* Уведомления */}
+      <Snackbar
+        open={notification.open}
+        autoHideDuration={6000}
+        onClose={() => setNotification({ ...notification, open: false })}
+      >
+        <Alert severity={notification.severity}>{notification.message}</Alert>
+      </Snackbar>
+    </Box>
   );
 };
 

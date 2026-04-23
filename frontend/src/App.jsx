@@ -10,13 +10,13 @@
 // import LoginPage from './pages/LoginPage';
 // import RegisterPage from './pages/RegisterPage';
 // import MySheetsPage from './pages/MySheetsPage';
-// import { NotificationProvider } from './context/NotificationContext';
 
 // // Импорт компонентов
 // import Layout from './components/Layout';
 // import ProtectedRoute from './components/ProtectedRoute';
 // import NotificationSnackbar from './components/NotificationSnackbar';
 // import { AuthProvider } from './context/AuthContext';
+// import { NotificationProvider } from './context/NotificationContext'; // Добавляем импорт
 
 // const theme = createTheme({
 //   palette: {
@@ -30,28 +30,30 @@
 //     <ThemeProvider theme={theme}>
 //       <CssBaseline />
 //       <AuthProvider>
-//         <Router>
-//           <Routes>
-//             <Route path="/login" element={<LoginPage />} />
-//             <Route path="/register" element={<RegisterPage />} />
-            
-//             <Route path="/" element={
-//               <ProtectedRoute>
-//                 <Layout />
-//               </ProtectedRoute>
-//             }>
-//               <Route index element={<Navigate to="/defect-sheets" replace />} />
-//               <Route path="defect-sheets" element={<DefectSheetPage />} />
-//               <Route path="defect-sheet/:sheetId" element={<DefectSheetPage />} />
-//               <Route path="approvals" element={<ApprovalsPage />} />
-//               <Route path="my-sheets" element={<MySheetsPage />} />
-//             </Route>
-            
-//             <Route path="*" element={<Navigate to="/" replace />} />
-//           </Routes>
-//           {/*  ВАЖНО: NotificationSnackbar должен быть ВНУТРИ Router, но после Routes */}
-//           <NotificationSnackbar />
-//         </Router>
+//         <NotificationProvider> {/* NotificationProvider должен быть внутри AuthProvider */}
+//           <Router>
+//             <Routes>
+//               <Route path="/login" element={<LoginPage />} />
+//               <Route path="/register" element={<RegisterPage />} />
+              
+//               <Route path="/" element={
+//                 <ProtectedRoute>
+//                   <Layout />
+//                 </ProtectedRoute>
+//               }>
+//                 <Route index element={<Navigate to="/defect-sheets" replace />} />
+//                 <Route path="defect-sheets" element={<DefectSheetPage />} />
+//                 <Route path="defect-sheet/:sheetId" element={<DefectSheetPage />} />
+//                 <Route path="approvals" element={<ApprovalsPage />} />
+//                 <Route path="my-sheets" element={<MySheetsPage />} />
+//               </Route>
+              
+//               <Route path="*" element={<Navigate to="/" replace />} />
+//             </Routes>
+//             {/* NotificationSnackbar должен быть ВНУТРИ Router, но после Routes */}
+//             <NotificationSnackbar />
+//           </Router>
+//         </NotificationProvider>
 //       </AuthProvider>
 //     </ThemeProvider>
 //   );
@@ -68,15 +70,17 @@ import CssBaseline from '@mui/material/CssBaseline';
 import DefectSheetPage from './pages/DefectSheetPage';
 import ApprovalsPage from './pages/ApprovalsPage';
 import LoginPage from './pages/LoginPage';
-import RegisterPage from './pages/RegisterPage';
+import RegisterPage from './pages/RegistryPage';
 import MySheetsPage from './pages/MySheetsPage';
+import DashboardPage from './pages/DashboardPage'; // Новая страница
+import RegistryPage from './pages/RegistryPage'; // Будет создана позже
 
 // Импорт компонентов
 import Layout from './components/Layout';
 import ProtectedRoute from './components/ProtectedRoute';
 import NotificationSnackbar from './components/NotificationSnackbar';
 import { AuthProvider } from './context/AuthContext';
-import { NotificationProvider } from './context/NotificationContext'; // Добавляем импорт
+import { NotificationProvider } from './context/NotificationContext';
 
 const theme = createTheme({
   palette: {
@@ -90,7 +94,7 @@ function App() {
     <ThemeProvider theme={theme}>
       <CssBaseline />
       <AuthProvider>
-        <NotificationProvider> {/* NotificationProvider должен быть внутри AuthProvider */}
+        <NotificationProvider>
           <Router>
             <Routes>
               <Route path="/login" element={<LoginPage />} />
@@ -101,16 +105,17 @@ function App() {
                   <Layout />
                 </ProtectedRoute>
               }>
-                <Route index element={<Navigate to="/defect-sheets" replace />} />
+                <Route index element={<Navigate to="/dashboard" replace />} />
+                <Route path="dashboard" element={<DashboardPage />} />
                 <Route path="defect-sheets" element={<DefectSheetPage />} />
                 <Route path="defect-sheet/:sheetId" element={<DefectSheetPage />} />
                 <Route path="approvals" element={<ApprovalsPage />} />
                 <Route path="my-sheets" element={<MySheetsPage />} />
+                <Route path="payment-registry" element={<RegistryPage />} />
               </Route>
               
-              <Route path="*" element={<Navigate to="/" replace />} />
+              <Route path="*" element={<Navigate to="/dashboard" replace />} />
             </Routes>
-            {/* NotificationSnackbar должен быть ВНУТРИ Router, но после Routes */}
             <NotificationSnackbar />
           </Router>
         </NotificationProvider>

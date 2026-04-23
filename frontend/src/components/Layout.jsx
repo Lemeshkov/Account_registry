@@ -1,5 +1,4 @@
 
-// // frontend/src/components/Layout.jsx
 // import React, { useEffect } from 'react';
 // import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 // import {
@@ -19,11 +18,18 @@
 //   Logout as LogoutIcon,
 // } from '@mui/icons-material';
 // import { useAuth } from '../context/AuthContext';
+// import { useNotifications } from '../context/NotificationContext'; // Добавляем импорт
 // import ApprovalNotifications from './ApprovalNotifications';
 // import NotificationSnackbar from './NotificationSnackbar';
 
 // const Layout = () => {
-//   const { user, logout, lastWebSocketMessage, wsConnected } = useAuth(); // <-- Добавили wsConnected
+//   const { user, logout, lastWebSocketMessage, wsConnected } = useAuth();
+//   const { 
+//     pendingApprovalsCount, 
+//     mySheetsNotificationsCount,
+//     resetPendingApprovalsCount,
+//     resetMySheetsNotificationsCount,
+//   } = useNotifications(); // Используем контекст уведомлений
 //   const navigate = useNavigate();
 //   const location = useLocation();
 
@@ -70,6 +76,14 @@
 //   };
 
 //   const handleTabChange = (event, newValue) => {
+//     // Сбрасываем счетчики при переходе на соответствующие вкладки
+//     if (newValue === 0) {
+//       resetMySheetsNotificationsCount();
+//     }
+//     if (newValue === 2) {
+//       resetPendingApprovalsCount();
+//     }
+    
 //     switch (newValue) {
 //       case 0:
 //         navigate('/my-sheets');
@@ -134,19 +148,50 @@
 //           onChange={handleTabChange}
 //           sx={{ px: 3 }}
 //         >
+//           {/* Вкладка "Мои ведомости" с счетчиком */}
 //           <Tab 
-//             icon={<AssignmentIcon />} 
+//             icon={
+//               <Badge 
+//                 badgeContent={mySheetsNotificationsCount} 
+//                 color="error"
+//                 sx={{
+//                   '& .MuiBadge-badge': {
+//                     top: -8,
+//                     right: -8,
+//                   }
+//                 }}
+//               >
+//                 <AssignmentIcon />
+//               </Badge>
+//             } 
 //             label="Мои ведомости" 
 //             iconPosition="start"
 //           />
+          
+//           {/* Вкладка "Новая ведомость" без счетчика */}
 //           <Tab 
 //             icon={<DescriptionIcon />} 
 //             label="Новая ведомость" 
 //             iconPosition="start"
 //           />
+          
+//           {/* Вкладка "Согласование" с счетчиком (только для approver/admin) */}
 //           {(user?.role === 'approver' || user?.role === 'admin') && (
 //             <Tab 
-//               icon={<CheckCircleIcon />} 
+//               icon={
+//                 <Badge 
+//                   badgeContent={pendingApprovalsCount} 
+//                   color="error"
+//                   sx={{
+//                     '& .MuiBadge-badge': {
+//                       top: -8,
+//                       right: -8,
+//                     }
+//                   }}
+//                 >
+//                   <CheckCircleIcon />
+//                 </Badge>
+//               } 
 //               label="Согласование" 
 //               iconPosition="start"
 //             />
@@ -167,7 +212,6 @@
 
 // export default Layout;
 
-// frontend/src/components/Layout.jsx
 import React, { useEffect } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import {
@@ -181,13 +225,15 @@ import {
   Badge,
 } from '@mui/material';
 import {
+  Dashboard as DashboardIcon,
   Description as DescriptionIcon,
   CheckCircle as CheckCircleIcon,
   Assignment as AssignmentIcon,
+  Receipt as ReceiptIcon,
   Logout as LogoutIcon,
 } from '@mui/icons-material';
 import { useAuth } from '../context/AuthContext';
-import { useNotifications } from '../context/NotificationContext'; // Добавляем импорт
+import { useNotifications } from '../context/NotificationContext';
 import ApprovalNotifications from './ApprovalNotifications';
 import NotificationSnackbar from './NotificationSnackbar';
 
@@ -198,7 +244,7 @@ const Layout = () => {
     mySheetsNotificationsCount,
     resetPendingApprovalsCount,
     resetMySheetsNotificationsCount,
-  } = useNotifications(); // Используем контекст уведомлений
+  } = useNotifications();
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -207,7 +253,6 @@ const Layout = () => {
     if (lastWebSocketMessage) {
       console.log('📨 Layout received notification:', lastWebSocketMessage);
       
-      // Показываем всплывающее уведомление
       if (lastWebSocketMessage.type === 'approval_request') {
         showBrowserNotification('📬 Новая ведомость на согласование', lastWebSocketMessage.message);
       } else if (lastWebSocketMessage.type === 'approval_approved') {
@@ -230,7 +275,6 @@ const Layout = () => {
     }
   };
 
-  // Запрос разрешения на уведомления при монтировании
   useEffect(() => {
     if ('Notification' in window && Notification.permission === 'default') {
       Notification.requestPermission();
@@ -238,46 +282,47 @@ const Layout = () => {
   }, []);
 
   const getCurrentTab = () => {
-    if (location.pathname.includes('/my-sheets')) return 0;
-    if (location.pathname.includes('/defect-sheets')) return 1;
-    if (location.pathname.includes('/approvals')) return 2;
+    if (location.pathname.includes('/dashboard')) return 0;
+    if (location.pathname.includes('/my-sheets')) return 1;
+    if (location.pathname.includes('/defect-sheets')) return 2;
+    if (location.pathname.includes('/payment-registry')) return 3;
+    if (location.pathname.includes('/approvals')) return 4;
     return 0;
   };
 
   const handleTabChange = (event, newValue) => {
-    // Сбрасываем счетчики при переходе на соответствующие вкладки
-    if (newValue === 0) {
-      resetMySheetsNotificationsCount();
-    }
-    if (newValue === 2) {
-      resetPendingApprovalsCount();
-    }
+    if (newValue === 1) resetMySheetsNotificationsCount();
+    if (newValue === 4) resetPendingApprovalsCount();
     
     switch (newValue) {
       case 0:
-        navigate('/my-sheets');
+        navigate('/dashboard');
         break;
       case 1:
-        navigate('/defect-sheets');
+        navigate('/my-sheets');
         break;
       case 2:
+        navigate('/defect-sheets');
+        break;
+      case 3:
+        navigate('/payment-registry');
+        break;
+      case 4:
         navigate('/approvals');
         break;
       default:
-        navigate('/my-sheets');
+        navigate('/dashboard');
     }
   };
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>
-      {/* Верхняя панель */}
       <AppBar position="static">
         <Toolbar>
           <Typography variant="h6" component="div" sx={{ flexGrow: 1 }}>
-            Дефектные ведомости
+            Конструктор документов
           </Typography>
           
-          {/* Статус WebSocket */}
           <Badge 
             color={wsConnected ? 'success' : 'error'} 
             variant="dot" 
@@ -285,7 +330,6 @@ const Layout = () => {
             title={wsConnected ? 'Соединение установлено' : 'Нет соединения'}
           />
           
-          {/* Информация о пользователе */}
           <Box sx={{ display: 'flex', alignItems: 'center', mr: 2 }}>
             <Typography variant="body2" sx={{ mr: 1 }}>
               {user?.full_name || user?.username}
@@ -298,37 +342,30 @@ const Layout = () => {
             />
           </Box>
           
-          {/* Уведомления (только для согласователей) */}
           {(user?.role === 'approver' || user?.role === 'admin') && (
             <ApprovalNotifications userId={user?.id} />
           )}
           
-          {/* Кнопка выхода */}
           <Button color="inherit" onClick={logout} startIcon={<LogoutIcon />}>
             Выйти
           </Button>
         </Toolbar>
       </AppBar>
 
-      {/* Вкладки навигации */}
       <Box sx={{ borderBottom: 1, borderColor: 'divider', bgcolor: 'background.paper' }}>
         <Tabs 
           value={getCurrentTab()} 
           onChange={handleTabChange}
           sx={{ px: 3 }}
         >
-          {/* Вкладка "Мои ведомости" с счетчиком */}
+          <Tab icon={<DashboardIcon />} label="Главная" iconPosition="start" />
+          
           <Tab 
             icon={
               <Badge 
                 badgeContent={mySheetsNotificationsCount} 
                 color="error"
-                sx={{
-                  '& .MuiBadge-badge': {
-                    top: -8,
-                    right: -8,
-                  }
-                }}
+                sx={{ '& .MuiBadge-badge': { top: -8, right: -8 } }}
               >
                 <AssignmentIcon />
               </Badge>
@@ -337,26 +374,17 @@ const Layout = () => {
             iconPosition="start"
           />
           
-          {/* Вкладка "Новая ведомость" без счетчика */}
-          <Tab 
-            icon={<DescriptionIcon />} 
-            label="Новая ведомость" 
-            iconPosition="start"
-          />
+          <Tab icon={<DescriptionIcon />} label="Дефектная ведомость" iconPosition="start" />
           
-          {/* Вкладка "Согласование" с счетчиком (только для approver/admin) */}
+          <Tab icon={<ReceiptIcon />} label="Реестр счетов" iconPosition="start" />
+          
           {(user?.role === 'approver' || user?.role === 'admin') && (
             <Tab 
               icon={
                 <Badge 
                   badgeContent={pendingApprovalsCount} 
                   color="error"
-                  sx={{
-                    '& .MuiBadge-badge': {
-                      top: -8,
-                      right: -8,
-                    }
-                  }}
+                  sx={{ '& .MuiBadge-badge': { top: -8, right: -8 } }}
                 >
                   <CheckCircleIcon />
                 </Badge>
@@ -368,12 +396,10 @@ const Layout = () => {
         </Tabs>
       </Box>
 
-      {/* Основной контент */}
       <Box sx={{ flexGrow: 1, p: 3, bgcolor: '#f5f5f5' }}>
         <Outlet />
       </Box>
       
-      {/* Компонент для всплывающих уведомлений */}
       <NotificationSnackbar />
     </Box>
   );

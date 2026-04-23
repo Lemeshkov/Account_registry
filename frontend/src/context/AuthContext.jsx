@@ -49,6 +49,7 @@ export const AuthProvider = ({ children }) => {
         console.log('🔌 WebSocket disconnected');
         wsConnectedRef.current = false;
         setWsConnected(false);
+        // Раскомментируйте если нужно авто-переподключение
         // setTimeout(() => {
         //   if (user?.id) setupWebSocket(user.id);
         // }, 5000);
@@ -66,7 +67,7 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
-  // Функция logout должна быть объявлена ДО того, как используется в useEffect
+  // Функция logout
   const logout = () => {
     console.log('👋 Logging out...');
     if (wsRef.current) {
@@ -84,6 +85,8 @@ export const AuthProvider = ({ children }) => {
   const loadUser = async () => {
     try {
       console.log('🔍 Loading user data...');
+      console.log('📝 Current token:', localStorage.getItem('token')?.substring(0, 20) + '...');
+      
       const userData = await api.get('/users/me');
       console.log('✅ User loaded:', userData);
       setUser(userData);
@@ -91,10 +94,18 @@ export const AuthProvider = ({ children }) => {
       if (userData?.id) {
         setupWebSocket(userData.id);
       }
+      return true;
     } catch (error) {
       console.error('❌ Failed to load user:', error);
-      api.setToken(null);
-      localStorage.removeItem('token');
+      
+      // Если 401 - просто чистим токен и редиректим
+      if (error.message?.includes('401') || error.message?.includes('Unauthorized')) {
+        console.log('🔒 Unauthorized, clearing token');
+        api.setToken(null);
+        localStorage.removeItem('token');
+        setUser(null);
+      }
+      return false;
     } finally {
       setLoading(false);
     }
@@ -102,14 +113,20 @@ export const AuthProvider = ({ children }) => {
 
   // useEffect для инициализации при монтировании
   useEffect(() => {
-    const token = localStorage.getItem('token');
-    if (token) {
-      api.setToken(token);
-      loadUser();
-    } else {
-      setLoading(false);
-    }
-  }, []); // Пустой массив зависимостей - выполняется один раз
+    const initAuth = async () => {
+      const token = localStorage.getItem('token');
+      console.log('🔑 Initial token found:', !!token);
+      
+      if (token) {
+        api.setToken(token);
+        await loadUser();
+      } else {
+        setLoading(false);
+      }
+    };
+    
+    initAuth();
+  }, []);
 
   // useEffect для обработки события выхода из системы
   useEffect(() => {
@@ -123,20 +140,19 @@ export const AuthProvider = ({ children }) => {
     return () => {
       window.removeEventListener('auth:logout', handleAuthLogout);
     };
-  }, []); // Пустой массив зависимостей - logout стабильная функция
+  }, []);
 
   const login = async (username, password) => {
+    setLoading(true);
     try {
       console.log('📝 Login attempt for:', username);
       
-      const formData = new FormData();
-      formData.append('username', username);
-      formData.append('password', password);
-      
       const data = await api.login(username, password);
       
-      console.log('✅ Login successful, token received');
+      console.log('✅ Login successful, token saved');
+      console.log('🔑 Token saved:', localStorage.getItem('token')?.substring(0, 20) + '...');
       
+      // Загружаем пользователя
       await loadUser();
       
       return { success: true };
@@ -146,6 +162,8 @@ export const AuthProvider = ({ children }) => {
         success: false, 
         error: error.message || 'Ошибка входа. Проверьте имя пользователя и пароль.' 
       };
+    } finally {
+      setLoading(false);
     }
   };
 

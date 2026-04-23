@@ -4,6 +4,11 @@ const API_BASE_URL = 'http://localhost:8000';
 class ApiService {
   constructor() {
     this.token = localStorage.getItem('token');
+    
+    // Слушаем событие выхода
+    window.addEventListener('auth:logout', () => {
+      this.token = null;
+    });
   }
 
   // Метод для установки токена
@@ -26,6 +31,8 @@ class ApiService {
     if (this.token) {
       headers['Authorization'] = `Bearer ${this.token}`;
       console.log('🔑 Adding token to request:', this.token.substring(0, 20) + '...');
+    } else {
+      console.warn('⚠️ No token available for request');
     }
 
     return headers;
@@ -118,6 +125,10 @@ class ApiService {
     return this._request('PATCH', endpoint, data);
   }
 
+  async put(endpoint, data) {
+    return this._request('PUT', endpoint, data);
+  }
+
   // Метод для логина (специальный, без токена)
   async login(username, password) {
     const formData = new FormData();
@@ -145,7 +156,18 @@ class ApiService {
     return data;
   }
 
-  // Методы для дефектных ведомостей
+  // Метод для регистрации
+  async register(userData) {
+    return this.post('/users', userData);
+  }
+
+  // Метод для получения текущего пользователя
+  async getCurrentUser() {
+    return this.get('/users/me');
+  }
+
+  // ========== МЕТОДЫ ДЛЯ ДЕФЕКТНЫХ ВЕДОМОСТЕЙ ==========
+  
   async createDefectItem(data) {
     return this.post('/api/defect/items', data);
   }
@@ -163,7 +185,8 @@ class ApiService {
   }
 
   async getDefectItems(sheetId) {
-    return this.get(`/api/defect/${sheetId}/items`);
+    const response = await this.get(`/api/defect/${sheetId}/items`);
+    return response;
   }
 
   async calculateDefectItems(data) {
@@ -186,12 +209,10 @@ class ApiService {
     return this.patch(`/api/defect/items/${itemId}`, { field, value });
   }
 
-  // Метод для получения информации о ведомости
   async getDefectSheetInfo(sheetId) {
     return this.get(`/api/defect/${sheetId}/info`);
   }
 
-  // Метод для отправки на согласование
   async submitForApproval(sheetId, comment) {
     return this.post('/api/defect/submit-for-approval', {
       sheet_id: sheetId,
@@ -199,7 +220,6 @@ class ApiService {
     });
   }
 
-  // Метод для согласования/отклонения
   async approveSheet(sheetId, approved, comment) {
     return this.post('/api/defect/approve', {
       sheet_id: sheetId,
@@ -208,32 +228,81 @@ class ApiService {
     });
   }
 
-  // Метод для получения ожидающих согласования
   async getPendingApprovals() {
     return this.get('/api/defect/pending-approvals');
   }
 
-  // Метод для получения моих ведомостей
   async getMySheets() {
-    return this.get('/api/defect/my-sheets');
+    const response = await this.get('/api/defect/my-sheets');
+    return response;
   }
 
-  // Метод для сохранения всех элементов
- async saveDefectSheetWithItems(sheetId, items) {
-  return this.post('/api/defect/save', { 
-    sheet_id: sheetId,
-    items: items.map(item => ({
-      id: item.id,
-      calculated_meters: item.calculated_meters,
-      formula_used: item.formula_used,
-      is_calculated: true  // ← можно хардкодом true, т.к. сохраняем только пересчитанные
-    }))
-  });
+  async saveDefectSheetWithItems(sheetId, items) {
+    return this.post('/api/defect/save', { 
+      sheet_id: sheetId,
+      items: items.map(item => ({
+        id: item.id,
+        calculated_meters: item.calculated_meters,
+        formula_used: item.formula_used,
+        is_calculated: true
+      }))
+    });
+  }
+
+  async mergeDefectSheet(sheetId, file) {
+    const formData = new FormData();
+    formData.append('file', file);
+    return this.post(`/api/defect/${sheetId}/merge`, formData);
+  }
+
+  // ========== МЕТОДЫ ДЛЯ РЕЕСТРА СЧЕТОВ ==========
+  
+  async uploadRegistryFile(formData) {
+    return this.post('/upload', formData);
+  }
+
+  async getRegistryPreview(batchId) {
+    return this.get(`/invoice/${batchId}/preview`);
+  }
+
+  async getInvoicesFromBuffer(batchId) {
+    return this.get(`/registry/${batchId}/invoices-from-buffer`);
+  }
+
+  async getInvoiceLines(invoiceId) {
+    return this.get(`/invoice/${invoiceId}/lines`);
+  }
+
+  async applyInvoiceLines(invoiceId, lineNos, registryId, batchId) {
+    return this.post('/invoice/apply-multiple-lines', {
+      invoice_id: invoiceId,
+      line_nos: lineNos,
+      registry_id: registryId,
+      batch_id: batchId,
+    });
+  }
+
+  async applyAllInvoiceLines(invoiceId, registryId, batchId) {
+    return this.post('/invoice/apply-all-lines', {
+      invoice_id: invoiceId,
+      registry_id: registryId,
+      batch_id: batchId,
+    });
+  }
+
+  async manualMatchInvoice(batchId, registryId, invoiceId, applyType) {
+    return this.post('/invoice/manual-match', {
+      batch_id: batchId,
+      registry_id: registryId,
+      invoice_id: invoiceId,
+      apply_type: applyType,
+    });
+  }
+
+  async reorderRegistry(batchId, items) {
+    return this.post('/registry/reorder', { batch_id: batchId, items });
+  }
 }
-
-}
-
-
 
 // Создаем и экспортируем единственный экземпляр сервиса
 const apiService = new ApiService();
