@@ -154,6 +154,13 @@ class WebSocketManager:
             "user_connections": len(self.user_connections),
             "total_subscribers": sum(len(clients) for clients in self.batch_subscriptions.values())
         }
+    
+    async def broadcast_to_admins(self, message: dict):
+        """Отправить сообщение всем подключенным администраторам"""
+        for client_id in self.active_connections:
+        # Проверяем, является ли клиент администратором
+            if client_id in self.user_auth and self.user_auth[client_id].get('role') == 'admin':
+                await self.send_to_client(client_id, message)
 
 # Глобальный экземпляр менеджера
 websocket_manager = WebSocketManager()

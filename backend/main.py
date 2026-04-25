@@ -1,6 +1,4 @@
 
-
-# backend/main.py
 from fastapi import (
     FastAPI,
     File,
@@ -22,12 +20,14 @@ import uuid
 import shutil
 import logging
 from collections import defaultdict
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
 from typing import List, Dict, Any, Optional
 from datetime import datetime, timedelta
 import os
 import asyncio
 import time
+import secrets
+import string
 
 # JWT и пароли
 from jose import JWTError, jwt
@@ -255,8 +255,71 @@ class ApprovalRequest(BaseModel):
     approved: bool
     comment: Optional[str] = None
 
+
+# Модели для админ-панели (Pydantic v2)
+class UserCreateAdmin(BaseModel):
+    username: str = Field(..., min_length=3, max_length=50)
+    email: Optional[str] = Field(None, max_length=100)
+    full_name: Optional[str] = Field(None, max_length=100)
+    password: str = Field(..., min_length=6)
+    role: str = Field(default="user", pattern=r"^(user|approver|admin)$")
+    
+    @field_validator('email')
+    @classmethod
+    def validate_email(cls, v: Optional[str]) -> Optional[str]:
+        if v is None or v.strip() == '':
+            return None
+        return v.strip()
+    
+    @field_validator('full_name')
+    @classmethod
+    def validate_full_name(cls, v: Optional[str]) -> Optional[str]:
+        if v is None or v.strip() == '':
+            return None
+        return v.strip()
+    
+    @field_validator('username')
+    @classmethod
+    def username_alphanumeric(cls, v: str) -> str:
+        if not v.replace('_', '').isalnum():
+            raise ValueError('Username must contain only letters, numbers and underscores')
+        return v
+
+class UserUpdateAdmin(BaseModel):
+    email: Optional[str] = Field(None, max_length=100)
+    full_name: Optional[str] = Field(None, max_length=100)
+    role: Optional[str] = Field(None, pattern=r"^(user|approver|admin)$")
+    is_active: Optional[bool] = None
+    password: Optional[str] = Field(None, min_length=6)
+    
+    @field_validator('email')
+    @classmethod
+    def validate_email(cls, v: Optional[str]) -> Optional[str]:
+        if v is None or v.strip() == '':
+            return None
+        return v.strip()
+    
+    @field_validator('full_name')
+    @classmethod
+    def validate_full_name(cls, v: Optional[str]) -> Optional[str]:
+        if v is None or v.strip() == '':
+            return None
+        return v.strip()
+
+class UserResponseAdmin(UserResponse):
+    created_at: datetime
+    is_active: bool
+    
+    model_config = {
+        "from_attributes": True
+    }
+
+class PasswordResetResponse(BaseModel):
+    temporary_password: Optional[str] = None
+    message: str
+
 # -------------------------------------------------------------------
-# ФУНКЦИИ АУТЕНТИФИКАЦИИ
+# ФУНКЦИИ АУТЕНТИФИКАЦИИ (правильный порядок)
 # -------------------------------------------------------------------
 
 def verify_password(plain_password, hashed_password):
@@ -306,7 +369,27 @@ async def get_current_active_user(current_user: User = Depends(get_current_user)
     return current_user
 
 # -------------------------------------------------------------------
+# ФУНКЦИИ ДЛЯ АДМИН-ПАНЕЛИ (после get_current_active_user)
+# -------------------------------------------------------------------
 
+async def get_current_admin_user(
+    current_user: User = Depends(get_current_active_user)
+) -> User:
+    """Проверяет, что текущий пользователь имеет роль admin"""
+    if current_user.role != "admin":
+        raise HTTPException(
+            status_code=403,
+            detail="Access denied. Admin privileges required."
+        )
+    return current_user
+
+def generate_temporary_password(length: int = 12) -> str:
+    """Генерирует случайный временный пароль"""
+    alphabet = string.ascii_letters + string.digits + "!@#$%"
+    password = ''.join(secrets.choice(alphabet) for _ in range(length))
+    return password
+
+# -------------------------------------------------------------------
 
 BASE_UPLOAD_DIR = Path("uploads")
 BASE_UPLOAD_DIR.mkdir(exist_ok=True)
@@ -1109,6 +1192,7 @@ def apply_all_invoice_lines(payload: ApplyAllLinesRequest, db: Session = Depends
 # -------------------------------------------------------------------
 # ЭНДПОИНТЫ ДЛЯ ДЕФЕКТНЫХ ВЕДОМОСТЕЙ
 # -------------------------------------------------------------------
+
 
 @app.post("/api/defect/upload")
 async def upload_defect_sheet(
@@ -2306,6 +2390,378 @@ async def approve_defect_sheet(
         "message": message
     }
 
+@app.post("/api/defect/approve")
+async def approve_defect_sheet(
+    request: ApprovalRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    if current_user.role not in ["approver", "admin"]:
+        raise HTTPException(403, "Только согласователи могут выполнять это действие")
+    
+    sheet = db.query(DefectSheet).filter(DefectSheet.id == request.sheet_id).first()
+    if not sheet:
+        raise HTTPException(404, "Дефектная ведомость не найдена")
+    
+    if sheet.status != "pending":
+        raise HTTPException(400, f"Ведомость уже {sheet.status}")
+    
+    approver_name = current_user.full_name or current_user.username
+    
+    if request.approved:
+        sheet.status = "approved"
+        sheet.approved_at = datetime.now()
+        sheet.approved_by = current_user.id
+        sheet.approval_comment = request.comment
+        
+        message = f"Ведомость #{sheet.id} согласована"
+        notification_type = "approval_approved"
+    else:
+        sheet.status = "rejected"
+        sheet.rejected_at = datetime.now()
+        sheet.rejected_by = current_user.id
+        sheet.rejection_reason = request.comment
+        
+        message = f"Ведомость #{sheet.id} отклонена"
+        notification_type = "approval_rejected"
+    
+    # Отмечаем уведомления как обработанные
+    db.query(ApprovalNotification).filter(
+        ApprovalNotification.sheet_id == sheet.id,
+        ApprovalNotification.status == "unread"
+    ).update({"status": "processed", "processed_at": datetime.now()})
+    
+    db.commit()
+    
+    # Уведомляем создателя о результате
+    if sheet.created_by:
+        asyncio.create_task(websocket_manager.send_to_user(str(sheet.created_by), {
+            "type": notification_type,
+            "sheet_id": sheet.id,
+            "batch_id": sheet.batch_id,
+            "message": message,
+            "comment": request.comment,
+            "approved_by": approver_name,
+            "approved_at": datetime.now().isoformat(),
+            "status": sheet.status
+        }))
+    
+    # Уведомляем всех согласователей об изменении статуса
+    other_approvers = db.query(User).filter(
+        User.role.in_(["approver", "admin"]),
+        User.id != current_user.id
+    ).all()
+    
+    for approver in other_approvers:
+        asyncio.create_task(websocket_manager.send_to_user(str(approver.id), {
+            "type": "approval_processed",
+            "sheet_id": sheet.id,
+            "batch_id": sheet.batch_id,
+            "message": f"Ведомость #{sheet.id} {message.lower()} пользователем {approver_name}",
+            "processed_by": approver_name,
+            "processed_at": datetime.now().isoformat(),
+            "status": sheet.status
+        }))
+    
+    return {
+        "status": sheet.status,
+        "sheet_id": sheet.id,
+        "message": message
+    }
+@app.get("/api/defect/{sheet_id}/info")
+def get_defect_sheet_info(sheet_id: int, db: Session = Depends(get_db)):
+    """Получить информацию о ведомости по ID"""
+    sheet = db.query(DefectSheet).filter(DefectSheet.id == sheet_id).first()
+    if not sheet:
+        raise HTTPException(404, "Дефектная ведомость не найдена")
+    
+    return {
+        "id": sheet.id,
+        "batch_id": sheet.batch_id,
+        "file_name": sheet.file_name,
+        "status": sheet.status,
+        "total_items": sheet.total_items,
+        "created_at": sheet.created_at,
+        "submitted_at": sheet.submitted_at,
+        "approved_at": sheet.approved_at,
+        "rejected_at": sheet.rejected_at
+    }
+
+# ===================================================================
+# АДМИН-ПАНЕЛЬ: УПРАВЛЕНИЕ ПОЛЬЗОВАТЕЛЯМИ
+# ===================================================================
+
+@app.get("/api/admin/users", response_model=List[UserResponseAdmin])
+async def get_all_users(
+    skip: int = 0,
+    limit: int = 100,
+    role: Optional[str] = None,
+    is_active: Optional[bool] = None,
+    search: Optional[str] = None,
+    current_user: User = Depends(get_current_admin_user),
+    db: Session = Depends(get_db)
+):
+    """Получить список всех пользователей (только для admin)"""
+    query = db.query(User)
+    
+    if role:
+        query = query.filter(User.role == role)
+    if is_active is not None:
+        query = query.filter(User.is_active == is_active)
+    if search:
+        query = query.filter(
+            (User.username.ilike(f"%{search}%")) |
+            (User.email.ilike(f"%{search}%")) |
+            (User.full_name.ilike(f"%{search}%"))
+        )
+    
+    users = query.order_by(User.created_at.desc()).offset(skip).limit(limit).all()
+    return users
+
+@app.post("/api/admin/users", response_model=UserResponseAdmin)
+async def create_user_by_admin(
+    user_data: UserCreateAdmin,
+    current_user: User = Depends(get_current_admin_user),
+    db: Session = Depends(get_db)
+):
+    """Создать нового пользователя (только для admin)"""
+    
+    # Проверка уникальности username
+    existing_user = db.query(User).filter(User.username == user_data.username).first()
+    if existing_user:
+        raise HTTPException(status_code=400, detail="Username already exists")
+    
+    # Проверка уникальности email (только если email не None)
+    if user_data.email:
+        existing_email = db.query(User).filter(User.email == user_data.email).first()
+        if existing_email:
+            raise HTTPException(status_code=400, detail="Email already exists")
+    
+    # Создаем нового пользователя
+    hashed_password = get_password_hash(user_data.password)
+    db_user = User(
+        username=user_data.username,
+        email=user_data.email,  # Может быть None
+        full_name=user_data.full_name,  # Может быть None
+        hashed_password=hashed_password,
+        role=user_data.role,
+        is_active=True
+    )
+    
+    db.add(db_user)
+    db.commit()
+    db.refresh(db_user)
+    
+    # Логируем действие
+    create_history(
+        db,
+        action="USER_CREATED",
+        entity="User",
+        entity_id=db_user.id,
+        user=current_user.username,
+        details={
+            "created_by": current_user.username,
+            "username": db_user.username,
+            "role": db_user.role
+        }
+    )
+    db.commit()
+    
+    return db_user
+@app.put("/api/admin/users/{user_id}", response_model=UserResponseAdmin)
+async def update_user_by_admin(
+    user_id: int,
+    user_data: UserUpdateAdmin,
+    current_user: User = Depends(get_current_admin_user),
+    db: Session = Depends(get_db)
+):
+    """Обновить пользователя (только для admin)"""
+    
+    db_user = db.query(User).filter(User.id == user_id).first()
+    if not db_user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    if user_id == current_user.id and user_data.is_active is False:
+        raise HTTPException(status_code=400, detail="You cannot deactivate your own account")
+    
+    changes = {}
+    
+    if user_data.email is not None:
+        # Проверяем уникальность email только если email не None
+        if user_data.email:
+            existing = db.query(User).filter(
+                User.email == user_data.email,
+                User.id != user_id
+            ).first()
+            if existing:
+                raise HTTPException(status_code=400, detail="Email already exists")
+        db_user.email = user_data.email
+        changes["email"] = user_data.email
+    
+    if user_data.full_name is not None:
+        db_user.full_name = user_data.full_name
+        changes["full_name"] = user_data.full_name
+    
+    if user_data.role is not None:
+        db_user.role = user_data.role
+        changes["role"] = user_data.role
+    
+    if user_data.is_active is not None:
+        db_user.is_active = user_data.is_active
+        changes["is_active"] = user_data.is_active
+    
+    if user_data.password:
+        db_user.hashed_password = get_password_hash(user_data.password)
+        changes["password_changed"] = True
+    
+    db.commit()
+    db.refresh(db_user)
+    
+    if changes:
+        create_history(
+            db,
+            action="USER_UPDATED",
+            entity="User",
+            entity_id=db_user.id,
+            user=current_user.username,
+            details={
+                "updated_by": current_user.username,
+                "changes": changes
+            }
+        )
+        db.commit()
+    
+    return db_user
+
+@app.delete("/api/admin/users/{user_id}")
+async def deactivate_user(
+    user_id: int,
+    current_user: User = Depends(get_current_admin_user),
+    db: Session = Depends(get_db)
+):
+    """Деактивировать пользователя (только для admin)"""
+    db_user = db.query(User).filter(User.id == user_id).first()
+    if not db_user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    if user_id == current_user.id:
+        raise HTTPException(status_code=400, detail="You cannot deactivate your own account")
+    
+    db_user.is_active = False
+    db.commit()
+    
+    create_history(
+        db,
+        action="USER_DEACTIVATED",
+        entity="User",
+        entity_id=db_user.id,
+        user=current_user.username,
+        details={
+            "deactivated_by": current_user.username,
+            "username": db_user.username
+        }
+    )
+    db.commit()
+    
+    return {"status": "success", "message": f"User {db_user.username} deactivated"}
+
+@app.post("/api/admin/users/{user_id}/reactivate")
+async def reactivate_user(
+    user_id: int,
+    current_user: User = Depends(get_current_admin_user),
+    db: Session = Depends(get_db)
+):
+    """Реактивировать пользователя (только для admin)"""
+    db_user = db.query(User).filter(User.id == user_id).first()
+    if not db_user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    db_user.is_active = True
+    db.commit()
+    
+    create_history(
+        db,
+        action="USER_REACTIVATED",
+        entity="User",
+        entity_id=db_user.id,
+        user=current_user.username,
+        details={
+            "reactivated_by": current_user.username,
+            "username": db_user.username
+        }
+    )
+    db.commit()
+    
+    return {"status": "success", "message": f"User {db_user.username} reactivated"}
+
+@app.post("/api/admin/users/{user_id}/reset-password", response_model=PasswordResetResponse)
+async def reset_user_password(
+    user_id: int,
+    generate_temporary: bool = True,
+    new_password: Optional[str] = None,
+    current_user: User = Depends(get_current_admin_user),
+    db: Session = Depends(get_db)
+):
+    """Сбросить пароль пользователя (только для admin)"""
+    db_user = db.query(User).filter(User.id == user_id).first()
+    if not db_user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    if new_password and not generate_temporary:
+        if len(new_password) < 6:
+            raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
+        password_to_set = new_password
+        temporary = False
+        message = "Password has been reset"
+    else:
+        password_to_set = generate_temporary_password()
+        temporary = True
+        message = "Temporary password generated"
+    
+    db_user.hashed_password = get_password_hash(password_to_set)
+    db.commit()
+    
+    create_history(
+        db,
+        action="PASSWORD_RESET",
+        entity="User",
+        entity_id=db_user.id,
+        user=current_user.username,
+        details={
+            "reset_by": current_user.username,
+            "username": db_user.username,
+            "temporary": temporary
+        }
+    )
+    db.commit()
+    
+    return PasswordResetResponse(
+        temporary_password=password_to_set if temporary else None,
+        message=message
+    )
+
+@app.get("/api/admin/stats")
+async def get_admin_stats(
+    current_user: User = Depends(get_current_admin_user),
+    db: Session = Depends(get_db)
+):
+    """Получить статистику для админ-панели"""
+    total_users = db.query(User).count()
+    active_users = db.query(User).filter(User.is_active == True).count()
+    inactive_users = total_users - active_users
+    
+    users_by_role = {}
+    for role in ["user", "approver", "admin"]:
+        count = db.query(User).filter(User.role == role).count()
+        users_by_role[role] = count
+    
+    return {
+        "total_users": total_users,
+        "active_users": active_users,
+        "inactive_users": inactive_users,
+        "users_by_role": users_by_role
+    }
+
 # -------------------------------------------------------------------
 # WEB SOCKET SUPPORT
 # -------------------------------------------------------------------
@@ -2468,30 +2924,6 @@ async def startup_event():
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
-    
-    #-------------------------------------------------------------
-    #Эндпоинт для согласования
-    #-----------------------------------------------------------------------
-
-@app.get("/api/defect/{sheet_id}/info")
-def get_defect_sheet_info(sheet_id: int, db: Session = Depends(get_db)):
-    """Получить информацию о ведомости по ID"""
-    sheet = db.query(DefectSheet).filter(DefectSheet.id == sheet_id).first()
-    if not sheet:
-        raise HTTPException(404, "Дефектная ведомость не найдена")
-    
-    return {
-        "id": sheet.id,
-        "batch_id": sheet.batch_id,
-        "file_name": sheet.file_name,
-        "status": sheet.status,
-        "total_items": sheet.total_items,
-        "created_at": sheet.created_at,
-        "submitted_at": sheet.submitted_at,
-        "approved_at": sheet.approved_at,
-        "rejected_at": sheet.rejected_at
-    }
-
 
 
 
